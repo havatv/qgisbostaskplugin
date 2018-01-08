@@ -1,0 +1,21 @@
+[general]
+name=BOS
+version=0.1
+qgisMinimumVersion=2.99
+qgisMaximumVersion=3.99
+description=Assess the geometric accuracy of a line dataset by comparing to a line dataset of significantly higher accuracy using the BOS method.
+author=Håvard Tveite, NMBU
+email=havard.tveite@nmbu.no
+about=The BOS Plugin compares the geometries of two line layers (the input and the reference layer) by buffering and overlay for several buffer sizes, collecting statistics and plotting the results for a visual assessment of the geometric accuracy (and completeness) of the line data set according to the BOS method.
+tracker=https://github.com/havatv/qgisbosplugin/issues
+repository=https://github.com/havatv/qgisbosplugin.git
+homepage=http://arken.nmbu.no/~havatv/gis/qgisplugins/bos
+
+changelog=0.1.0
+    - Initial version
+tags=lines,line,statistics,vector,accuracy,completeness
+category=Vector
+icon=bos.png
+experimental=True
+deprecated=False
+

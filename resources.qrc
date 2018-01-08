@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/plugins/BOS" >
+        <file>bos.png</file>
+    </qresource>
+</RCC>
