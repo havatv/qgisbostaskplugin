@@ -1,0 +1,2 @@
+# qgisbostaskplugin
+BOS using qgstask
