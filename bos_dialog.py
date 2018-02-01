@@ -41,6 +41,10 @@ from qgis.PyQt.QtWidgets import QDialog, QDialogButtonBox
 from qgis.PyQt.QtWidgets import QPushButton, QProgressBar, QMessageBox
 from qgis.PyQt.QtCore import Qt
 
+from qgis.core import QgsProcessingAlgRunnerTask   # ok
+from qgis.core import QgsApplication   # ok
+from qgis.core import QgsProcessingContext  # thread manipulation?
+
 
 #2# from qgis.core import QgsMessageLog, QgsMapLayerRegistry
 #2# from qgis.core import QGis
@@ -162,18 +166,47 @@ class BOSDialog(QDialog, FORM_CLASS):
                                                self.iface.messageBar().INFO)
             self.messageBar = msgBar
             self.showInfo('GUI thread: ' + str(QThread.currentThread()) + ' ID: ' + str(QThread.currentThreadId()))
+
+            ###### Testing QgsTask!!!
+            context = QgsProcessingContext()
+            #context.setProject(QgsProject.instance())
+            alg=QgsApplication.processingRegistry().algorithmById('native:buffer')
+            #alg=QgsApplication.processingRegistry().algorithmById('qgis:buffer')
+            #[p.name() for p in alg.parameterDefinitions()]
+            params={
+              #'INPUT': '32_0214vegsituasjon_linje',
+              'INPUT': inputlayer,
+              'DISTANCE': 100.0,
+              'OUTPUT':'/home/havatv/test.shp'
+            }
+            task = QgsProcessingAlgRunnerTask(alg,params,context)
+            #  connect()
+            #task.begun.connect(self.task_begun)
+            #task.taskCompleted.connect(self.task_completed)
+            #task.progressChanged.connect(self.progress)
+            #task.taskTerminated.connect(self.task_stopped)
+
+
+            QgsApplication.taskManager().addTask(task)  # Crasher qgis med trådproblemer
+            print('Buffer 1 startet')
+
+
+
+
+
+
             # start the worker in a new thread
-            thread = QThread(self)
-            worker.moveToThread(thread)
-            worker.finished.connect(self.workerFinished)
-            worker.error.connect(self.workerError)
-            worker.status.connect(self.workerInfo)
-            worker.progress.connect(self.progressBar.setValue)
-            worker.progress.connect(self.aprogressBar.setValue)
-            thread.started.connect(worker.run)
-            thread.start()
-            self.thread = thread
-            self.worker = worker
+            #thread = QThread(self)
+            #worker.moveToThread(thread)
+            #worker.finished.connect(self.workerFinished)
+            #worker.error.connect(self.workerError)
+            #worker.status.connect(self.workerInfo)
+            #worker.progress.connect(self.progressBar.setValue)
+            #worker.progress.connect(self.aprogressBar.setValue)
+            #thread.started.connect(worker.run)
+            #thread.start()
+            #self.thread = thread
+            #self.worker = worker
             self.button_box.button(QDialogButtonBox.Ok).setEnabled(False)
             self.button_box.button(QDialogButtonBox.Close).setEnabled(False)
             self.button_box.button(QDialogButtonBox.Cancel).setEnabled(True)
