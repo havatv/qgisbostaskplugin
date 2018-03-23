@@ -169,6 +169,7 @@ class BOSDialog(QDialog, FORM_CLASS):
 
             ###### Testing QgsTask!!!
             context = QgsProcessingContext()
+            self.showInfo('Context: ' + str(context))
             #context.setProject(QgsProject.instance())
             alg=QgsApplication.processingRegistry().algorithmById('native:buffer')
             #alg=QgsApplication.processingRegistry().algorithmById('qgis:buffer')
@@ -179,7 +180,9 @@ class BOSDialog(QDialog, FORM_CLASS):
               'DISTANCE': 100.0,
               'OUTPUT':'/home/havatv/test.shp'
             }
+            #  QgsProcessingAlgorithm, QVariantMap, QgsProcessingContext, QgsProcessingFeedback
             task = QgsProcessingAlgRunnerTask(alg,params,context)
+            self.showInfo('Task: ' + str(task))
             #  connect()
             #task.begun.connect(self.task_begun)
             #task.taskCompleted.connect(self.task_completed)
@@ -187,7 +190,7 @@ class BOSDialog(QDialog, FORM_CLASS):
             #task.taskTerminated.connect(self.task_stopped)
 
 
-            QgsApplication.taskManager().addTask(task)  # Crasher qgis med trådproblemer
+            #QgsApplication.taskManager().addTask(task)  # Crasher qgis med trådproblemer
             print('Buffer 1 startet')
 
 

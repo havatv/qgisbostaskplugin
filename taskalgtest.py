@@ -18,6 +18,7 @@ params={
 'INPUT': '32_0214vegsituasjon_linje',
 'DISTANCE': 100.0,
 'OUTPUT':'/home/havatv/test.shp'
+##'OUTPUT': 'memory:myLayerName'  # Kræsjer QGIS!
 }
 
 task = QgsProcessingAlgRunnerTask(alg,params,context)
