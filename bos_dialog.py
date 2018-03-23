@@ -47,7 +47,7 @@ from qgis.core import QgsProcessingContext  # thread manipulation?
 
 
 #2# from qgis.core import QgsMessageLog, QgsMapLayerRegistry
-#2# from qgis.core import QGis
+from qgis.core import Qgis
 #from qgis.core import QgsMapLayer
 from qgis.gui import QgsMessageBar
 
@@ -163,7 +163,7 @@ class BOSDialog(QDialog, FORM_CLASS):
             # Has to be popped after the thread has finished (in
             # workerFinished).
             self.iface.messageBar().pushWidget(msgBar,
-                                               self.iface.messageBar().INFO)
+                                               Qgis.Info)
             self.messageBar = msgBar
             self.showInfo('GUI thread: ' + str(QThread.currentThread()) + ' ID: ' + str(QThread.currentThreadId()))
 
@@ -178,7 +178,8 @@ class BOSDialog(QDialog, FORM_CLASS):
               #'INPUT': '32_0214vegsituasjon_linje',
               'INPUT': inputlayer,
               'DISTANCE': 100.0,
-              'OUTPUT':'/home/havatv/test.shp'
+              #'OUTPUT':'/home/havatv/test.shp'
+              'OUTPUT':'memory:'
             }
             #  QgsProcessingAlgorithm, QVariantMap, QgsProcessingContext, QgsProcessingFeedback
             task = QgsProcessingAlgRunnerTask(alg,params,context)
@@ -220,6 +221,10 @@ class BOSDialog(QDialog, FORM_CLASS):
             pass
         # End of startworker
 
+    #def task_completed(self, ok, result)
+    #    
+
+
     def workerFinished(self, ok, ret):
         """Handles the output from the worker and cleans up after the
            worker has finished."""
@@ -235,7 +240,7 @@ class BOSDialog(QDialog, FORM_CLASS):
             stats = ret
             self.showInfo(str(ret))
             QgsMessageLog.logMessage(self.tr('BOS finished'),
-                                     self.BOS, QgsMessageLog.INFO)
+                                     self.BOS, Qgis.Info)
         else:
             # notify the user that something went wrong
             if not ok:
@@ -261,22 +266,22 @@ class BOSDialog(QDialog, FORM_CLASS):
     def workerInfo(self, message_string):
         """Report an info message from the worker."""
         QgsMessageLog.logMessage(self.tr('Worker') + ': ' + message_string,
-                                 self.BOS, QgsMessageLog.INFO)
+                                 self.BOS, Qgis.Info)
 
     def showError(self, text):
         """Show an error."""
         self.iface.messageBar().pushMessage(self.tr('Error'), text,
-                                            level=QgsMessageBar.CRITICAL,
+                                            level=Qgis.Critical,
                                             duration=3)
         QgsMessageLog.logMessage('Error: ' + text, self.BOS,
-                                 QgsMessageLog.CRITICAL)
+                                 Qgis.Critical)
 
     def showInfo(self, text):
         """Show info."""
         self.iface.messageBar().pushMessage(self.tr('Info'), text,
-                                            level=QgsMessageBar.INFO,
+                                            level=Qgis.Info,
                                             duration=2)
         QgsMessageLog.logMessage('Info: ' + text, self.BOS,
-                                 QgsMessageLog.INFO)
+                                 Qgis.Info)
 
 
