@@ -25,6 +25,7 @@ from os.path import dirname
 from os.path import join
 #import os
 import csv
+import math
 
 from qgis.PyQt import uic
 from qgis.PyQt.QtCore import QCoreApplication, QObject, QThread
@@ -32,7 +33,7 @@ from qgis.PyQt.QtWidgets import QDialog, QDialogButtonBox
 from qgis.PyQt.QtWidgets import QPushButton, QProgressBar, QMessageBox
 from qgis.PyQt.QtCore import Qt, QVariant
 
-from qgis.PyQt.QtCore import QPointF, QLineF, QRectF, QPoint
+from qgis.PyQt.QtCore import QPointF, QLineF, QRect, QRectF, QPoint
 
 from qgis.PyQt.QtWidgets import QGraphicsScene, QGraphicsView, QGraphicsLineItem, QGraphicsEllipseItem, QGraphicsTextItem
 from qgis.PyQt.QtGui import QFont
@@ -99,11 +100,20 @@ class BOSDialog(QDialog, FORM_CLASS):
 
         # Connect signals
         okButton.clicked.connect(self.startWorker)
+        self.displacementButton.clicked.connect(self.showPlots)
+        self.avgdispButton.clicked.connect(self.showAverageDisplacement)
+        self.oscillationButton.clicked.connect(self.showOscillation)
+        self.complmiscButton.clicked.connect(self.showComplenessMiscoding)
+
+        # Global variable for the statistics
+        self.statistics = []        
+
 
     def startWorker(self):
         """Initialises and starts."""
         try:
-            statistics = []
+            # Initialise the statistics variable (to contain the results)
+            self.statistics = []
             layerindex = self.inputLayer.currentIndex()
             layerId = self.inputLayer.itemData(layerindex)
             #2# inputlayer = QgsMapLayerRegistry.instance().mapLayer(layerId)
@@ -164,6 +174,8 @@ class BOSDialog(QDialog, FORM_CLASS):
             #[p.name() for p in alg.parameterDefinitions()]
             for radius in radii:
                 self.showInfo('Radius: ' + str(radius))
+
+                #####  INPUT BUFFER  #################
                 params={
                   'INPUT': inputlayer,
                   'DISTANCE': radius,
@@ -189,6 +201,7 @@ class BOSDialog(QDialog, FORM_CLASS):
                 #self.showInfo('inpb, field index: ' + str(field_index))
                 ## Big problems! layer.getFeatures does not work, update of attributes does not work!???
                 ##for f in provider.getFeatures():  # finner objekter
+                # Set the 'InputB' attribute value to 'I'
                 for f in inpblayer.getFeatures():  # finner ingen!
                      self.showInfo('Feature (inpb): ' + str(f))
                      #attrs = { field_index : 'I' }
@@ -201,6 +214,7 @@ class BOSDialog(QDialog, FORM_CLASS):
                 self.showInfo('Input buffer finished')
                 self.showInfo('inpblayer: ' + str(inpblayer))
 
+                #####  REFERENCE BUFFER  #################
                 params = {
                   'INPUT': reflayer,
                   'DISTANCE': radius,
@@ -223,7 +237,7 @@ class BOSDialog(QDialog, FORM_CLASS):
                 #field_index = provider.fieldNameIndex('RefB')
                 field_index = refblayer.fields().lookupField('RefB')
                 self.showInfo('refb, field index: ' + str(field_index))
-
+                # Set the 'RefB' attribute value to 'R'
                 for f in provider.getFeatures():
                     self.showInfo('Feature (refb): ' + str(f))
                     refblayer.changeAttributeValue(f.id(), field_index, 'R')
@@ -231,6 +245,7 @@ class BOSDialog(QDialog, FORM_CLASS):
                 self.showInfo('Reference buffer finished')
                 self.showInfo('refblayer: ' + str(refblayer))
 
+                #####  UNION  #################
                 params={
                   'INPUT': inpblayer,
                   'OVERLAY': refblayer,
@@ -270,6 +285,7 @@ class BOSDialog(QDialog, FORM_CLASS):
                     i = f.attributes()[iidx]
                     r = f.attributes()[ridx]
                 #    c = f.attributes()[cidx]
+                    # Set the 'Combined' attribute value to show the combination
                     comb = ''
                     if i is not None:
                       if r is not None:
@@ -281,6 +297,7 @@ class BOSDialog(QDialog, FORM_CLASS):
                         comb = str(r)
                       else:
                         comb = None
+                    self.showInfo('Combination: ' + str(comb))
                     unionlayer.changeAttributeValue(f.id(), combined_field_index, comb)
                 unionlayer.commitChanges()
 
@@ -309,7 +326,7 @@ class BOSDialog(QDialog, FORM_CLASS):
                     currstats[row['Combined']] = row['sum']
                 
 
-                statistics.append([radius, currstats])
+                self.statistics.append([radius, currstats])
 
 
 
@@ -337,7 +354,8 @@ class BOSDialog(QDialog, FORM_CLASS):
             #self.showInfo('Buffer 1 startet')  # Denne funker
 
 
-            self.showPlots(statistics)
+            self.showPlots()
+            #self.showAverageDisplacement()
 
             #self.button_box.button(QDialogButtonBox.Ok).setEnabled(False)
             #self.button_box.button(QDialogButtonBox.Close).setEnabled(False)
@@ -350,8 +368,11 @@ class BOSDialog(QDialog, FORM_CLASS):
         # End of startworker
 
 
-    # Very incomplete!
-    def showPlots(self, stats):
+    # Incomplete...??
+    def showPlots(self):
+      stats = self.statistics
+      if len(stats) == 0:
+        return
       try:
         #BOSGraphicsView
         self.BOSscene.clear()
@@ -371,7 +392,7 @@ class BOSDialog(QDialog, FORM_CLASS):
         padleft = 23
         padright = 6
         padbottom = 10
-        padtop = 6
+        padtop = 25
 
         minx = padleft
         maxx = width - padright
@@ -391,9 +412,15 @@ class BOSDialog(QDialog, FORM_CLASS):
             size = float(sizet)
             sizes.append(size)
             #oiir, iiir, iior = sizestats
-            oiir = float(sizestats['NULLR'])
-            iiir = float(sizestats['IR'])
-            iior = float(sizestats['INULL'])
+            try:
+                oiir = float(sizestats['NULLR'])
+                iiir = float(sizestats['IR'])
+                iior = float(sizestats['INULL'])
+            except:
+                import traceback
+                self.showError(traceback.format_exc())
+                self.showInfo("Some measures are not available!")
+                return
             sum = oiir + iiir + iior
             normoiirsizes.append(oiir/sum)
             normiiirsizes.append(iiir/sum)
@@ -413,6 +440,19 @@ class BOSDialog(QDialog, FORM_CLASS):
         #rectangle = QRectF(self.BOSGraphicsView.mapToScene(boundingbox))
         #rectangle = self.BOSGraphicsView.mapToScene(boundingbox)
         #self.BOSscene.addRect(rectangle)
+
+        # Add title
+        labeltext = str("BOS - Displacements")
+        label = QGraphicsTextItem()
+        font = QFont()
+        font.setPointSize(10)
+        label.setFont(font)
+        label.setPlainText(labeltext)
+        lwidth = label.boundingRect().width()
+        lheight = label.boundingRect().height()
+        label.setPos((minx+maxx)/2 - lwidth/2, padtop/2 - lheight/2)
+        self.BOSscene.addItem(label)
+
 
         # Add vertical lines
         startx = padleft
@@ -461,12 +501,13 @@ class BOSDialog(QDialog, FORM_CLASS):
             line = QGraphicsLineItem(QLineF(start, end))
             line.setPen(QPen(QColor(204, 204, 204)))
             self.BOSscene.addItem(line)
-            labeltext = str(i*10)+'%'
+            labeltext = str((10-i)*10)+'%'
             label = QGraphicsTextItem()
             font = QFont()
             font.setPointSize(6)
             label.setFont(font)
-            label.setPos(-2,ysize-starty+padtop-4)
+            #label.setPos(-2,ysize-starty+padtop-4)
+            label.setPos(-2,starty-10)
             label.setPlainText(labeltext)
             self.BOSscene.addItem(label)
         # Plot Outside input, Inside reference
@@ -486,6 +527,7 @@ class BOSDialog(QDialog, FORM_CLASS):
               topt = QPoint(endx, endy)
               end = QPointF(self.BOSGraphicsView.mapToScene(topt))
               line = QGraphicsLineItem(QLineF(start, end))
+              self.ringcolour = QColor(255, 204, 204)
               line.setPen(QPen(self.ringcolour))
               self.BOSscene.addItem(line)
             prevx = size
@@ -541,6 +583,177 @@ class BOSDialog(QDialog, FORM_CLASS):
 
 
 
+    # Very incomplete!
+    def showAverageDisplacement(self):
+      stats = self.statistics
+      if len(stats) == 0:
+        return
+      try:
+        #BOSGraphicsView
+        self.BOSscene.clear()
+        viewprect = QRectF(self.BOSGraphicsView.viewport().rect())
+        self.BOSGraphicsView.setSceneRect(viewprect)
+        bottom = self.BOSGraphicsView.sceneRect().bottom()
+        top = self.BOSGraphicsView.sceneRect().top()
+        left = self.BOSGraphicsView.sceneRect().left()
+        right = self.BOSGraphicsView.sceneRect().right()
+        height = bottom - top
+        width = right - left
+        size = width
+        if width > height:
+            size = height
+        padding = 3
+        padleft = 30
+        padright = 6
+        padbottom = 10
+        padtop = 25
+
+        minx = padleft
+        maxx = width - padright
+        xsize = maxx - minx
+        miny = padtop
+        maxy = height - padbottom
+        ysize = maxy - miny
+        maxval = 0
+        maxsize = 0
+        sizes = []
+        avgdisplacements = []
+        sums = []
+        for stat in stats:
+            sizet, sizestats = stat
+            size = float(sizet)
+            buffersize = size
+            sizes.append(size)
+            #oiir, iiir, iior = sizestats
+            try:
+                oiir = float(sizestats['NULLR'])
+                iiir = float(sizestats['IR'])
+                iior = float(sizestats['INULL'])
+            except:
+                import traceback
+                self.showError(traceback.format_exc())
+                self.showInfo("Some measures are not available!")
+                return
+
+            suminputbuffer = iiir + iior  # The complete input buffer
+            avgdisp = math.pi/2.0 * 2 * buffersize * oiir / suminputbuffer
+            avgdisplacements.append(avgdisp)
+            self.showInfo("avgdisp: " + str(avgdisp))
+            if maxval < avgdisp:
+                maxval = avgdisp
+            if maxsize < size:
+                maxsize = size
+        self.showInfo("Maxval: " + str(maxval) + " Maxsize: " + str(maxsize) + " Steps: " + str(len(sizes)))
+        # Prepare the graph
+        boundingbox = QRect(padleft,padtop,xsize,ysize)
+        #rectangle = QRectF(self.BOSGraphicsView.mapToScene(boundingbox))
+        #rectangle = self.BOSGraphicsView.mapToScene(boundingbox)
+        #self.BOSscene.addRect(rectangle)
+
+        labeltext = str("Average displacement")
+        label = QGraphicsTextItem()
+        font = QFont()
+        font.setPointSize(10)
+        label.setFont(font)
+        label.setPlainText(labeltext)
+        lwidth = label.boundingRect().width()
+        lheight = label.boundingRect().height()
+        label.setPos((minx+maxx)/2 - lwidth/2, padtop/2 - lheight/2)
+        self.BOSscene.addItem(label)
+
+        # Add vertical lines
+        startx = padleft
+        starty = padtop
+        frompt = QPoint(startx, starty)
+        start = QPointF(self.BOSGraphicsView.mapToScene(frompt))
+        endx = startx
+        endy = padtop + ysize
+        topt = QPoint(endx, endy)
+        end = QPointF(self.BOSGraphicsView.mapToScene(topt))
+        line = QGraphicsLineItem(QLineF(start, end))
+        line.setPen(QPen(QColor(204, 204, 204)))
+        self.BOSscene.addItem(line)
+        for i in range(len(sizes)):
+            size = sizes[i]
+            startx = padleft + xsize * size / maxsize
+            starty = padtop
+            frompt = QPoint(startx, starty)
+            start = QPointF(self.BOSGraphicsView.mapToScene(frompt))
+            endx = startx
+            endy = padtop + ysize
+            topt = QPoint(endx, endy)
+            end = QPointF(self.BOSGraphicsView.mapToScene(topt))
+            line = QGraphicsLineItem(QLineF(start, end))
+            line.setPen(QPen(QColor(204, 204, 204)))
+            self.BOSscene.addItem(line)
+            labeltext = str(sizes[i])
+            label = QGraphicsTextItem()
+            font = QFont()
+            font.setPointSize(6)
+            label.setFont(font)
+            label.setPos(startx-6,ysize+padtop-4)
+            label.setPlainText(labeltext)
+            self.BOSscene.addItem(label)
+        # Add horizontal lines (needs refinement!)
+        for i in range(11):
+            startx = padleft
+            starty = padtop + i * ysize/10.0
+            frompt = QPoint(startx, starty)
+            start = QPointF(self.BOSGraphicsView.mapToScene(frompt))
+            endx = padleft + xsize
+            endy = starty
+            topt = QPoint(endx, endy)
+            end = QPointF(self.BOSGraphicsView.mapToScene(topt))
+            line = QGraphicsLineItem(QLineF(start, end))
+            line.setPen(QPen(QColor(204, 204, 204)))
+            self.BOSscene.addItem(line)
+            labeltext = str(i*maxval/10)
+            labeltext = '{:.1e}'. format(float((10-i)*maxval/10))
+            label = QGraphicsTextItem()
+            font = QFont()
+            font.setPointSize(6)
+            label.setFont(font)
+            #label.setPos(-2,ysize-starty+padtop-4)
+            label.setPos(-2,starty-10)
+            label.setPlainText(labeltext)
+            self.BOSscene.addItem(label)
+        # Plot Average displacement
+        first = True
+        for i in range(len(sizes)):
+            size = sizes[i]
+            value = avgdisplacements[i] / maxval
+            if first:
+              first = False
+            else:
+              startx = padleft + xsize * prevx / maxsize
+              starty = padtop + ysize * (1-prevy)
+              frompt = QPoint(startx, starty)
+              start = QPointF(self.BOSGraphicsView.mapToScene(frompt))
+              endx = padleft + xsize * size / maxsize
+              endy = padtop + ysize * (1-value)
+              topt = QPoint(endx, endy)
+              end = QPointF(self.BOSGraphicsView.mapToScene(topt))
+              line = QGraphicsLineItem(QLineF(start, end))
+              self.ringcolour = QColor(255, 0, 0)
+              line.setPen(QPen(self.ringcolour))
+              self.BOSscene.addItem(line)
+            prevx = size
+            prevy = value
+        # Do completeness
+        #plotCompleteness()    
+
+      except:
+        import traceback
+        #self.showInfo("Error plotting")
+        self.showInfo(traceback.format_exc())
+
+
+
+    def showOscillation(self):
+        return
+
+    def showComplenessMiscoding(self):
+        return
 
     # Handle the result of the processing
     def task_executed(self, ok, result):
