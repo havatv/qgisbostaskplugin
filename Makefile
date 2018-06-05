@@ -38,13 +38,13 @@ LRELEASE = lrelease
 # translation
 SOURCES = \
 	__init__.py \
-	bos.py bos_dialog.py bos_engine.py
+	bos.py bos_dialog.py
 
 PLUGINNAME = BOS
 
 PY_FILES = \
 	__init__.py \
-	bos.py bos_dialog.py bos_engine.py
+	bos.py bos_dialog.py
 
 UI_FILES = bos_dialog_base.ui
 
