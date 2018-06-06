@@ -28,19 +28,20 @@ import csv
 import math
 
 from qgis.PyQt import uic
-from qgis.PyQt.QtCore import QCoreApplication, QObject, QThread
+from qgis.PyQt.QtCore import QCoreApplication, QObject, QThread, QSettings
 from qgis.PyQt.QtWidgets import QDialog, QDialogButtonBox
 from qgis.PyQt.QtWidgets import QPushButton, QProgressBar, QMessageBox
+from qgis.PyQt.QtWidgets import QFileDialog
 from qgis.PyQt.QtCore import Qt, QVariant
 
-from qgis.PyQt.QtCore import QPointF, QLineF, QRect, QRectF, QPoint
+from qgis.PyQt.QtCore import QPointF, QLineF, QRect, QRectF, QPoint, QSize, QSizeF
 
 from qgis.PyQt.QtWidgets import QGraphicsScene, QGraphicsView, QGraphicsLineItem, QGraphicsEllipseItem, QGraphicsTextItem
 from qgis.PyQt.QtGui import QFont
 from qgis.PyQt.QtGui import QBrush, QPen, QColor
 from qgis.PyQt.QtGui import QPainter
 from qgis.PyQt.QtPrintSupport import QPrinter
-
+from qgis.PyQt.QtSvg import QSvgGenerator
 
 
 
@@ -104,7 +105,8 @@ class BOSDialog(QDialog, FORM_CLASS):
         self.avgdispButton.clicked.connect(self.showAverageDisplacement)
         self.oscillationButton.clicked.connect(self.showOscillation)
         self.complmiscButton.clicked.connect(self.showComplenessMiscoding)
-
+        self.saveSvgButton.clicked.connect(self.saveAsSVG)
+        self.saveAsPdfButton.clicked.connect(self.saveAsPDF)
         # Global variable for the statistics
         self.statistics = []        
 
@@ -169,8 +171,18 @@ class BOSDialog(QDialog, FORM_CLASS):
             bufferalg=QgsApplication.processingRegistry().algorithmById('native:buffer')
             #bufferalg=QgsApplication.processingRegistry().algorithmById('qgis:buffer')
             unionalg=QgsApplication.processingRegistry().algorithmById('qgis:union')
+            intersectionalg=QgsApplication.processingRegistry().algorithmById('qgis:intersection')
+            differencealg=QgsApplication.processingRegistry().algorithmById('qgis:difference')
+            multitosinglealg=QgsApplication.processingRegistry().algorithmById('qgis:multiparttosingleparts')
             statalg=QgsApplication.processingRegistry().algorithmById('qgis:statisticsbycategories')
 
+            # Calculate the total length of lines in the input layer
+            inpgeomlength = 0
+            for f in inputlayer.getFeatures():
+                inpgeomlength = inpgeomlength + f.geometry().length()
+            refgeomlength = 0
+            for f in reflayer.getFeatures():
+                refgeomlength = refgeomlength + f.geometry().length()
             #[p.name() for p in alg.parameterDefinitions()]
             for radius in radii:
                 self.showInfo('Radius: ' + str(radius))
@@ -203,12 +215,12 @@ class BOSDialog(QDialog, FORM_CLASS):
                 ##for f in provider.getFeatures():  # finner objekter
                 # Set the 'InputB' attribute value to 'I'
                 for f in inpblayer.getFeatures():  # finner ingen!
-                     self.showInfo('Feature (inpb): ' + str(f))
+                     #self.showInfo('Feature (inpb): ' + str(f))
                      #attrs = { field_index : 'I' }
                      #provider.changeAttributeValues({ f.id() : attrs })
                      #inpblayer.changeAttributeValue(f.id(), field_index, 1)
                      inpblayer.changeAttributeValue(f.id(), field_index, 'I')
-                     self.showInfo('Feature attr: ' + str(inpblayer.getFeature(f.id()).attributes()))
+                     #self.showInfo('Feature attr: ' + str(inpblayer.getFeature(f.id()).attributes()))
                 inpblayer.commitChanges() #OK
                 inpblayer.updateFields() #OK
                 self.showInfo('Input buffer finished')
@@ -272,7 +284,7 @@ class BOSDialog(QDialog, FORM_CLASS):
                 self.showInfo('union, combined field index: ' + str(combined_field_index))
                 #combined_field_index = unionalllayer.fieldNameIndex('Combined')
                 for f in provider.getFeatures():
-                    self.showInfo('Feature: ' + str(f))
+                    #self.showInfo('Feature: ' + str(f))
                     area = f.geometry().area()
                     unionlayer.changeAttributeValue(f.id(), area_field_index, area)
                     #iidx = provider.fieldNameIndex('InputB')
@@ -301,6 +313,66 @@ class BOSDialog(QDialog, FORM_CLASS):
                     unionlayer.changeAttributeValue(f.id(), combined_field_index, comb)
                 unionlayer.commitChanges()
 
+                #####  MULTIPART TO SINGLEPARTS  #################
+                # Count the number of polygons
+                params={
+                  'INPUT': unionlayer,
+                  'OUTPUT':'/home/havatv/singlepart' + str(radius) + '.shp'
+                  #'OUTPUT':'memory:'
+                }
+                singleunion = processing.run(multitosinglealg,params)
+                singlelayer = QgsProcessingUtils.mapLayerFromString(singleunion['OUTPUT'],plugincontext)
+                xoqiquery = "\"Combined\"='NULLR'"
+                singlelayer.selectByExpression (xoqiquery)
+                polycountoi = singlelayer.selectedFeatureCount()
+
+                #####  LINE-POLYGON (comleteness / miscodings) ##############
+                # reference lines with input buffer (completeness)
+                params={
+                  'INPUT': reflayer,
+                  'OVERLAY': inpblayer,
+                  'OUTPUT':'/home/havatv/reflinpb' + str(radius) + '.shp'
+                }
+                reflineinpbuf = processing.run(intersectionalg,params)
+                reflineinpbuflayer = QgsProcessingUtils.mapLayerFromString(reflineinpbuf['OUTPUT'],plugincontext)
+                self.showInfo('Intersection finished')
+                self.showInfo('reflineinpbuf: ' + str(reflineinpbuf['OUTPUT']))
+                self.showInfo('Reference line Intersect input buffer #features: ' + str(reflineinpbuflayer.featureCount()))
+                #iiquery = "\"RefB\"='R'"
+                #lilinerefbuflayer.selectByExpression (iiquery)
+                #self.showInfo('Input line Union reference buffer selected #features: ' + str(lilinerefbuflayer.selectedFeatureCount()))
+                reflinelength = 0
+                for f in reflineinpbuflayer.getFeatures():
+                    reflinelength = reflinelength + f.geometry().length()
+                totreflinelength = 0
+                for f in reflayer.getFeatures():
+                    totreflinelength = totreflinelength + f.geometry().length()
+                self.showInfo('Completeness: ' + str(reflinelength) + ' - ' + str(totreflinelength))
+                BOScompleteness = reflinelength / refgeomlength
+
+                # reference lines with input buffer (miscodings)
+                params={
+                  'INPUT': inputlayer,
+                  'OVERLAY': refblayer,
+                  'OUTPUT':'/home/havatv/inplrefb' + str(radius) + '.shp'
+                }
+                inplinerefbuf = processing.run(differencealg,params)
+                inplinerefbuflayer = QgsProcessingUtils.mapLayerFromString(inplinerefbuf['OUTPUT'],plugincontext)
+                self.showInfo('Difference finished')
+                self.showInfo('inlinerefbuf: ' + str(inplinerefbuf['OUTPUT']))
+                self.showInfo('Input line Intersect reference buffer #features: ' + str(inplinerefbuflayer.featureCount()))
+                #iiquery = "\"RefB\"='R'"
+                #lilinerefbuflayer.selectByExpression (iiquery)
+                #self.showInfo('Input line Union reference buffer selected #features: ' + str(lilinerefbuflayer.selectedFeatureCount()))
+                inplinelength = 0
+                for f in inplinerefbuflayer.getFeatures():
+                    inplinelength = inplinelength + f.geometry().length()
+                totinplinelength = 0
+                for f in inputlayer.getFeatures():
+                    totinplinelength = totinplinelength + f.geometry().length()
+                self.showInfo('Miscodings: ' + str(inplinelength) + ' - ' + str(totinplinelength))
+                BOSmiscodings = inplinelength / inpgeomlength
+
                 # Do the statistics
                 params={
                   'INPUT': unionlayer,
@@ -324,9 +396,8 @@ class BOSDialog(QDialog, FORM_CLASS):
                   for row in spamreader:
                     self.showInfo('Cat ' + row['Combined'] + ': ' +  str(row['sum']))
                     currstats[row['Combined']] = row['sum']
-                
-
-                self.statistics.append([radius, currstats])
+                oscillation1 = polycountoi/inpgeomlength
+                self.statistics.append([radius, currstats, oscillation1, BOScompleteness, BOSmiscodings])
 
 
 
@@ -408,7 +479,7 @@ class BOSDialog(QDialog, FORM_CLASS):
         normiiorsizes = []
         sums = []
         for stat in stats:
-            sizet, sizestats = stat
+            sizet, sizestats, polycount, completeness, miscodings = stat
             size = float(sizet)
             sizes.append(size)
             #oiir, iiir, iior = sizestats
@@ -620,7 +691,7 @@ class BOSDialog(QDialog, FORM_CLASS):
         avgdisplacements = []
         sums = []
         for stat in stats:
-            sizet, sizestats = stat
+            sizet, sizestats, polycount, completeness, miscodings = stat
             size = float(sizet)
             buffersize = size
             sizes.append(size)
@@ -650,7 +721,7 @@ class BOSDialog(QDialog, FORM_CLASS):
         #rectangle = self.BOSGraphicsView.mapToScene(boundingbox)
         #self.BOSscene.addRect(rectangle)
 
-        labeltext = str("Average displacement")
+        labeltext = str("BOS - Average displacement")
         label = QGraphicsTextItem()
         font = QFont()
         font.setPointSize(10)
@@ -739,8 +810,6 @@ class BOSDialog(QDialog, FORM_CLASS):
               self.BOSscene.addItem(line)
             prevx = size
             prevy = value
-        # Do completeness
-        #plotCompleteness()    
 
       except:
         import traceback
@@ -750,10 +819,368 @@ class BOSDialog(QDialog, FORM_CLASS):
 
 
     def showOscillation(self):
+      stats = self.statistics
+      if len(stats) == 0:
         return
+      try:
+        #BOSGraphicsView
+        self.BOSscene.clear()
+        viewprect = QRectF(self.BOSGraphicsView.viewport().rect())
+        self.BOSGraphicsView.setSceneRect(viewprect)
+        bottom = self.BOSGraphicsView.sceneRect().bottom()
+        top = self.BOSGraphicsView.sceneRect().top()
+        left = self.BOSGraphicsView.sceneRect().left()
+        right = self.BOSGraphicsView.sceneRect().right()
+        height = bottom - top
+        width = right - left
+        size = width
+        if width > height:
+            size = height
+        padding = 3
+        padleft = 30
+        padright = 6
+        padbottom = 10
+        padtop = 25
+
+        minx = padleft
+        maxx = width - padright
+        xsize = maxx - minx
+        miny = padtop
+        maxy = height - padbottom
+        ysize = maxy - miny
+        maxval = 0
+        maxsize = 0
+        sizes = []
+        polycounts = []
+        sums = []
+        for stat in stats:
+            sizet, sizestats, polycount, completeness, miscodings = stat
+            size = float(sizet)
+            buffersize = size
+            sizes.append(size)
+            polycounts.append(polycount)
+            self.showInfo("polycount: " + str(polycount))
+            if maxval < polycount:
+                maxval = polycount
+            if maxsize < size:
+                maxsize = size
+        self.showInfo("Maxval: " + str(maxval) + " Maxsize: " + str(maxsize) + " Steps: " + str(len(sizes)))
+        # Prepare the graph
+        boundingbox = QRect(padleft,padtop,xsize,ysize)
+
+        # Label for the heading
+        labeltext = str("BOS - Oscillation")
+        label = QGraphicsTextItem()
+        font = QFont()
+        font.setPointSize(10)
+        label.setFont(font)
+        label.setPlainText(labeltext)
+        lwidth = label.boundingRect().width()
+        lheight = label.boundingRect().height()
+        label.setPos((minx+maxx)/2 - lwidth/2, padtop/2 - lheight/2)
+        self.BOSscene.addItem(label)
+
+        # Add vertical lines
+        startx = padleft
+        starty = padtop
+        frompt = QPoint(startx, starty)
+        start = QPointF(self.BOSGraphicsView.mapToScene(frompt))
+        endx = startx
+        endy = padtop + ysize
+        topt = QPoint(endx, endy)
+        end = QPointF(self.BOSGraphicsView.mapToScene(topt))
+        line = QGraphicsLineItem(QLineF(start, end))
+        line.setPen(QPen(QColor(204, 204, 204)))
+        self.BOSscene.addItem(line)
+        for i in range(len(sizes)):
+            size = sizes[i]
+            startx = padleft + xsize * size / maxsize
+            starty = padtop
+            frompt = QPoint(startx, starty)
+            start = QPointF(self.BOSGraphicsView.mapToScene(frompt))
+            endx = startx
+            endy = padtop + ysize
+            topt = QPoint(endx, endy)
+            end = QPointF(self.BOSGraphicsView.mapToScene(topt))
+            line = QGraphicsLineItem(QLineF(start, end))
+            line.setPen(QPen(QColor(204, 204, 204)))
+            self.BOSscene.addItem(line)
+            labeltext = str(sizes[i])
+            label = QGraphicsTextItem()
+            font = QFont()
+            font.setPointSize(6)
+            label.setFont(font)
+            label.setPos(startx-6,ysize+padtop-4)
+            label.setPlainText(labeltext)
+            self.BOSscene.addItem(label)
+        # Add horizontal lines (needs refinement!)
+        for i in range(11):
+            startx = padleft
+            starty = padtop + i * ysize/10.0
+            frompt = QPoint(startx, starty)
+            start = QPointF(self.BOSGraphicsView.mapToScene(frompt))
+            endx = padleft + xsize
+            endy = starty
+            topt = QPoint(endx, endy)
+            end = QPointF(self.BOSGraphicsView.mapToScene(topt))
+            line = QGraphicsLineItem(QLineF(start, end))
+            line.setPen(QPen(QColor(204, 204, 204)))
+            self.BOSscene.addItem(line)
+            labeltext = str(i*maxval/10)
+            labeltext = '{:.1e}'. format(float((10-i)*maxval/10))
+            label = QGraphicsTextItem()
+            font = QFont()
+            font.setPointSize(6)
+            label.setFont(font)
+            #label.setPos(-2,ysize-starty+padtop-4)
+            label.setPos(-2,starty-10)
+            label.setPlainText(labeltext)
+            self.BOSscene.addItem(label)
+        # Plot Oscillations (number of polygons)
+        first = True
+        for i in range(len(sizes)):
+            size = sizes[i]
+            value = polycounts[i] / maxval
+            if first:
+              first = False
+            else:
+              startx = padleft + xsize * prevx / maxsize
+              starty = padtop + ysize * (1-prevy)
+              frompt = QPoint(startx, starty)
+              start = QPointF(self.BOSGraphicsView.mapToScene(frompt))
+              endx = padleft + xsize * size / maxsize
+              endy = padtop + ysize * (1-value)
+              topt = QPoint(endx, endy)
+              end = QPointF(self.BOSGraphicsView.mapToScene(topt))
+              line = QGraphicsLineItem(QLineF(start, end))
+              self.ringcolour = QColor(255, 0, 0)
+              line.setPen(QPen(self.ringcolour))
+              self.BOSscene.addItem(line)
+            prevx = size
+            prevy = value
+
+      except:
+        import traceback
+        #self.showInfo("Error plotting")
+        self.showInfo(traceback.format_exc())
+
 
     def showComplenessMiscoding(self):
+      stats = self.statistics
+      if len(stats) == 0:
         return
+      try:
+        #BOSGraphicsView
+        self.BOSscene.clear()
+        viewprect = QRectF(self.BOSGraphicsView.viewport().rect())
+        self.BOSGraphicsView.setSceneRect(viewprect)
+        bottom = self.BOSGraphicsView.sceneRect().bottom()
+        top = self.BOSGraphicsView.sceneRect().top()
+        left = self.BOSGraphicsView.sceneRect().left()
+        right = self.BOSGraphicsView.sceneRect().right()
+        height = bottom - top
+        width = right - left
+        size = width
+        if width > height:
+            size = height
+        padding = 3
+        padleft = 23
+        padright = 6
+        padbottom = 10
+        padtop = 25
+
+        minx = padleft
+        maxx = width - padright
+        xsize = maxx - minx
+        miny = padtop
+        maxy = height - padbottom
+        ysize = maxy - miny
+        maxval = 1
+        maxsize = 0
+        sizes = []
+        completenessv = []
+        miscodingsv = []
+        sums = []
+        for stat in stats:
+            sizet, sizestats, polycount, completeness, miscodings = stat
+            size = float(sizet)
+            buffersize = size
+            sizes.append(size)
+            completenessv.append(completeness)
+            miscodingsv.append(miscodings)
+            self.showInfo("completeness: " + str(completeness))
+            self.showInfo("miscodings: " + str(miscodings))
+            #if maxval < completeness:
+            #    maxval = completeness
+            #if maxval < miscodings:
+            #    maxval = miscodings
+            if maxsize < size:
+                maxsize = size
+        self.showInfo("Maxval: " + str(maxval) + " Maxsize: " + str(maxsize) + " Steps: " + str(len(sizes)))
+        # Prepare the graph
+        boundingbox = QRect(padleft,padtop,xsize,ysize)
+        labeltext = str("BOS - Completeness / Miscodings")
+        label = QGraphicsTextItem()
+        font = QFont()
+        font.setPointSize(10)
+        label.setFont(font)
+        label.setPlainText(labeltext)
+        lwidth = label.boundingRect().width()
+        lheight = label.boundingRect().height()
+        label.setPos((minx+maxx)/2 - lwidth/2, padtop/2 - lheight/2)
+        self.BOSscene.addItem(label)
+
+        # Add vertical lines
+        startx = padleft
+        starty = padtop
+        frompt = QPoint(startx, starty)
+        start = QPointF(self.BOSGraphicsView.mapToScene(frompt))
+        endx = startx
+        endy = padtop + ysize
+        topt = QPoint(endx, endy)
+        end = QPointF(self.BOSGraphicsView.mapToScene(topt))
+        line = QGraphicsLineItem(QLineF(start, end))
+        line.setPen(QPen(QColor(204, 204, 204)))
+        self.BOSscene.addItem(line)
+        for i in range(len(sizes)):
+            size = sizes[i]
+            startx = padleft + xsize * size / maxsize
+            starty = padtop
+            frompt = QPoint(startx, starty)
+            start = QPointF(self.BOSGraphicsView.mapToScene(frompt))
+            endx = startx
+            endy = padtop + ysize
+            topt = QPoint(endx, endy)
+            end = QPointF(self.BOSGraphicsView.mapToScene(topt))
+            line = QGraphicsLineItem(QLineF(start, end))
+            line.setPen(QPen(QColor(204, 204, 204)))
+            self.BOSscene.addItem(line)
+            labeltext = str(sizes[i])
+            label = QGraphicsTextItem()
+            font = QFont()
+            font.setPointSize(6)
+            label.setFont(font)
+            label.setPos(startx-6,ysize+padtop-4)
+            label.setPlainText(labeltext)
+            self.BOSscene.addItem(label)
+        # Add horizontal lines (needs refinement!)
+        for i in range(11):
+            startx = padleft
+            starty = padtop + i * ysize/10.0
+            frompt = QPoint(startx, starty)
+            start = QPointF(self.BOSGraphicsView.mapToScene(frompt))
+            endx = padleft + xsize
+            endy = starty
+            topt = QPoint(endx, endy)
+            end = QPointF(self.BOSGraphicsView.mapToScene(topt))
+            line = QGraphicsLineItem(QLineF(start, end))
+            line.setPen(QPen(QColor(204, 204, 204)))
+            self.BOSscene.addItem(line)
+            #labeltext = str(i*maxval/10)
+            #labeltext = '{:.1e}'. format(float((10-i)*maxval/10))
+            labeltext = str((10-i)*10)+'%'
+            label = QGraphicsTextItem()
+            font = QFont()
+            font.setPointSize(6)
+            label.setFont(font)
+            #label.setPos(-2,ysize-starty+padtop-4)
+            label.setPos(-2,starty-10)
+            label.setPlainText(labeltext)
+            self.BOSscene.addItem(label)
+        # Plot BOS completeness
+        first = True
+        for i in range(len(sizes)):
+            size = sizes[i]
+            value = completenessv[i] / maxval
+            if first:
+              first = False
+            else:
+              startx = padleft + xsize * prevx / maxsize
+              starty = padtop + ysize * (1-prevy)
+              frompt = QPoint(startx, starty)
+              start = QPointF(self.BOSGraphicsView.mapToScene(frompt))
+              endx = padleft + xsize * size / maxsize
+              endy = padtop + ysize * (1-value)
+              topt = QPoint(endx, endy)
+              end = QPointF(self.BOSGraphicsView.mapToScene(topt))
+              line = QGraphicsLineItem(QLineF(start, end))
+              self.ringcolour = QColor(255, 0, 0)
+              line.setPen(QPen(self.ringcolour))
+              self.BOSscene.addItem(line)
+            prevx = size
+            prevy = value
+        # Plot BOS miscodings
+        first = True
+        for i in range(len(sizes)):
+            size = sizes[i]
+            value = miscodingsv[i] / maxval
+            if first:
+              first = False
+            else:
+              startx = padleft + xsize * prevx / maxsize
+              starty = padtop + ysize * (1-prevy)
+              frompt = QPoint(startx, starty)
+              start = QPointF(self.BOSGraphicsView.mapToScene(frompt))
+              endx = padleft + xsize * size / maxsize
+              endy = padtop + ysize * (1-value)
+              topt = QPoint(endx, endy)
+              end = QPointF(self.BOSGraphicsView.mapToScene(topt))
+              line = QGraphicsLineItem(QLineF(start, end))
+              self.ringcolour = QColor(255, 0, 0)
+              line.setPen(QPen(self.ringcolour))
+              self.BOSscene.addItem(line)
+            prevx = size
+            prevy = value
+      except:
+        import traceback
+        self.showInfo(traceback.format_exc())
+
+
+    # Save to SVG
+    def saveAsSVG(self, location=None):
+        savename = location
+        settings = QSettings()
+        key = '/UI/lastShapefileDir'
+        if not isinstance(savename, basestring):
+            outDir = settings.value(key)
+            filter = 'SVG (*.svg)'
+            savename, _filter = QFileDialog.getSaveFileName(self, "Save to SVG",
+                                                   outDir, filter)
+            savename = unicode(savename)
+        svgGen = QSvgGenerator()
+        svgGen.setFileName(savename)
+        svgGen.setSize(QSize(200, 200))
+        svgGen.setViewBox(QRect(0, 0, 201, 201))
+        painter = QPainter(svgGen)
+        self.BOSscene.render(painter)
+        painter.end()
+        # Change default output location
+        if savename:
+            outDir = dirname(savename)
+            settings.setValue(key, outDir)
+
+    # Save to PDF
+    def saveAsPDF(self):
+        settings = QSettings()
+        key = '/UI/lastShapefileDir'
+        outDir = settings.value(key)
+        filter = 'PDF (*.pdf)'
+        savename, _filter = QFileDialog.getSaveFileName(self, "Save File",
+                                                        outDir, filter)
+        savename = unicode(savename)
+        printer = QPrinter(QPrinter.HighResolution)
+        printer.setPaperSize(QSizeF(100, 100), QPrinter.Millimeter)
+        printer.setPageMargins(0, 0, 0, 0, QPrinter.Millimeter)
+        printer.setOutputFormat(QPrinter.PdfFormat)
+        printer.setOutputFileName(savename)
+        p = QPainter(printer)
+        self.BOSscene.render(p)
+        p.end()
+        # Change default output location
+        if savename:
+            outDir = dirname(savename)
+            settings.setValue(key, outDir)
+
 
     # Handle the result of the processing
     def task_executed(self, ok, result):
