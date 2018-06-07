@@ -28,33 +28,30 @@ import csv
 import math
 
 from qgis.PyQt import uic
-from qgis.PyQt.QtCore import QCoreApplication, QObject, QThread, QSettings
-from qgis.PyQt.QtWidgets import QDialog, QDialogButtonBox
-from qgis.PyQt.QtWidgets import QPushButton, QProgressBar, QMessageBox
-from qgis.PyQt.QtWidgets import QFileDialog
-from qgis.PyQt.QtCore import Qt, QVariant
-
+#from qgis.PyQt.QtCore import QCoreApplication, QObject
+from qgis.PyQt.QtCore import QThread, QSettings
+#from qgis.PyQt.QtCore import Qt
+from qgis.PyQt.QtCore import QVariant
 from qgis.PyQt.QtCore import QPointF, QLineF, QRect, QRectF, QPoint, QSize, QSizeF
-
-from qgis.PyQt.QtWidgets import QGraphicsScene, QGraphicsView, QGraphicsLineItem, QGraphicsEllipseItem, QGraphicsTextItem
+from qgis.PyQt.QtWidgets import QDialog, QDialogButtonBox
+#from qgis.PyQt.QtWidgets import QPushButton, QProgressBar, QMessageBox
+from qgis.PyQt.QtWidgets import QFileDialog
+#from qgis.PyQt.QtWidgets import QGraphicsView, QGraphicsEllipseItem
+from qgis.PyQt.QtWidgets import QGraphicsScene, QGraphicsLineItem, QGraphicsTextItem
 from qgis.PyQt.QtGui import QFont
-from qgis.PyQt.QtGui import QBrush, QPen, QColor
+#from qgis.PyQt.QtGui import QBrush
+from qgis.PyQt.QtGui import QPen, QColor
 from qgis.PyQt.QtGui import QPainter
 from qgis.PyQt.QtPrintSupport import QPrinter
 from qgis.PyQt.QtSvg import QSvgGenerator
 
-
-
-#from qgis.core import QgsFeatureRequest, QgsField, QgsGeometry
 from qgis.core import QgsField
-from qgis.core import QgsProcessingAlgRunnerTask   # ok
+#from qgis.core import QgsProcessingAlgRunnerTask   # ok
 from qgis.core import QgsApplication   # ok
 from qgis.core import QgsProcessingContext  # thread manipulation?
 from qgis.core import QgsProcessingFeedback
 from qgis.core import QgsProcessingUtils
-
 from qgis.core import Qgis
-
 from qgis.core import QgsMessageLog, QgsProject
 
 #from sys.path import append
@@ -89,6 +86,9 @@ class BOSDialog(QDialog, FORM_CLASS):
         self.CLOSE = self.tr('Close')
         self.OK = self.tr('OK')
         #self.NUMBEROFSTEPS = 10  # Number of steps
+
+        self.labelTextSize = 8
+        self.titleTextSize = 10
 
         okButton = self.button_box.button(QDialogButtonBox.Ok)
         okButton.setText(self.OK)
@@ -136,17 +136,9 @@ class BOSDialog(QDialog, FORM_CLASS):
             if reflayer is None:
                 self.showError(self.tr('No reference layer defined'))
                 return
-            #if reflayer is not None and reflayer.crs().geographicFlag():
             if reflayer is not None and reflayer.sourceCrs().isGeographic():
                 self.showWarning('Geographic CRS used for the reference layer -'
                                  ' computations will be in decimal degrees!')
-            #outputlayername = self.outputDataset.text()
-            #approximateinputgeom = self.approximate_input_geom_cb.isChecked()
-            #joinprefix = self.joinPrefix.text()
-            #useindex = True
-            #useindex = self.use_index_nonpoint_cb.isChecked()
-            #useindexapproximation = self.use_indexapprox_cb.isChecked()
-            #distancefieldname = self.distancefieldname.text()
             steps = self.stepsSB.value()
             startradius = self.startRadiusSB.value()
             endradius = self.endRadiusSB.value()
@@ -155,18 +147,17 @@ class BOSDialog(QDialog, FORM_CLASS):
             for step in range(steps):
                 radii.append(startradius + step * delta)
             #radii = [10,20,50]
-            #self.showInfo(str(radii))
             prfeedback = QgsProcessingFeedback()
 
             selectedinputonly = self.selectedFeaturesCheckBox.isChecked()
             selectedrefonly = self.selectedRefFeaturesCheckBox.isChecked()
             plugincontext = dataobjects.createContext(prfeedback)
-            self.showInfo('Plugin context: ' + str(plugincontext))
+            #self.showInfo('Plugin context: ' + str(plugincontext))
             #self.showInfo('GUI thread: ' + str(QThread.currentThread()) + ' ID: ' + str(QThread.currentThreadId()))
             ###### Testing QgsTask!!!
             context = QgsProcessingContext()
             # context = None ## (arguement 3 has unexpected type 'NoneType')
-            self.showInfo('Normal context: ' + str(context))
+            #self.showInfo('Normal context: ' + str(context))
             #context.setProject(QgsProject.instance())
             bufferalg=QgsApplication.processingRegistry().algorithmById('native:buffer')
             #bufferalg=QgsApplication.processingRegistry().algorithmById('qgis:buffer')
@@ -196,35 +187,27 @@ class BOSDialog(QDialog, FORM_CLASS):
                   'END_CAP_STYLE': 0,
                   'JOIN_STYLE': 0,
                   'MITER_LIMIT': 10,
-                  'OUTPUT':'/home/havatv/buffinp' + str(radius) + '.shp'
-                  #'OUTPUT':'memory:'
+                  #'OUTPUT':'/home/havatv/buffinp' + str(radius) + '.shp'
+                  'OUTPUT':'memory:'
                 }
                 buffinp = processing.run(bufferalg,params) #OK
-                inpblayer = QgsProcessingUtils.mapLayerFromString(buffinp['OUTPUT'], plugincontext) #OK
-                self.showInfo('Inp buffer #features: ' + str(inpblayer.featureCount()))
+                #inpblayer = QgsProcessingUtils.mapLayerFromString(buffinp['OUTPUT'], plugincontext) #OK
+                inpblayer = buffinp['OUTPUT']
+                self.showInfo('Input buffer finished')
+                self.showInfo('inpblayer: ' + str(inpblayer))
+                #self.showInfo('Inp buffer #features: ' + str(inpblayer.featureCount()))
                 provider = inpblayer.dataProvider() #OK
-                #provider.addAttributes([QgsField('InputB', QVariant.Int)])
                 provider.addAttributes([QgsField('InputB', QVariant.String, len=5)]) #OK, but data type?
                 inpblayer.updateFields() #OK
                 inpblayer.startEditing() #OK
-                ##field_index = provider.fieldNameIndex('InputB')
-                ##field_index = inpblayer.fields().lookupField('InputB')
                 field_index = provider.fields().lookupField('InputB')
-                #self.showInfo('inpb, field index: ' + str(field_index))
-                ## Big problems! layer.getFeatures does not work, update of attributes does not work!???
-                ##for f in provider.getFeatures():  # finner objekter
                 # Set the 'InputB' attribute value to 'I'
                 for f in inpblayer.getFeatures():  # finner ingen!
                      #self.showInfo('Feature (inpb): ' + str(f))
-                     #attrs = { field_index : 'I' }
-                     #provider.changeAttributeValues({ f.id() : attrs })
-                     #inpblayer.changeAttributeValue(f.id(), field_index, 1)
                      inpblayer.changeAttributeValue(f.id(), field_index, 'I')
                      #self.showInfo('Feature attr: ' + str(inpblayer.getFeature(f.id()).attributes()))
                 inpblayer.commitChanges() #OK
                 inpblayer.updateFields() #OK
-                self.showInfo('Input buffer finished')
-                self.showInfo('inpblayer: ' + str(inpblayer))
 
                 #####  REFERENCE BUFFER  #################
                 params = {
@@ -235,18 +218,20 @@ class BOSDialog(QDialog, FORM_CLASS):
                   'END_CAP_STYLE': 0,
                   'JOIN_STYLE': 0,
                   'MITER_LIMIT': 10,
-                  'OUTPUT':'/home/havatv/buffref' + str(radius) + '.shp'
-                  #'OUTPUT':'memory:'
+                  #'OUTPUT':'/home/havatv/buffref' + str(radius) + '.shp'
+                  'OUTPUT':'memory:'
                 }
                 buffref = processing.run(bufferalg,params)
-                refblayer=QgsProcessingUtils.mapLayerFromString(buffref['OUTPUT'],plugincontext)
+                #refblayer=QgsProcessingUtils.mapLayerFromString(buffref['OUTPUT'],plugincontext)
+                refblayer=buffref['OUTPUT']
+                self.showInfo('Reference buffer finished')
+                self.showInfo('refblayer: ' + str(refblayer))
                 self.showInfo('Ref buffer #features: ' + str(refblayer.featureCount()))
                 provider = refblayer.dataProvider()
                 newfield = QgsField('RefB', QVariant.String, len=5)
                 provider.addAttributes([newfield])
                 refblayer.updateFields()
                 refblayer.startEditing()
-                #field_index = provider.fieldNameIndex('RefB')
                 field_index = refblayer.fields().lookupField('RefB')
                 self.showInfo('refb, field index: ' + str(field_index))
                 # Set the 'RefB' attribute value to 'R'
@@ -254,20 +239,19 @@ class BOSDialog(QDialog, FORM_CLASS):
                     self.showInfo('Feature (refb): ' + str(f))
                     refblayer.changeAttributeValue(f.id(), field_index, 'R')
                 refblayer.commitChanges()
-                self.showInfo('Reference buffer finished')
-                self.showInfo('refblayer: ' + str(refblayer))
 
                 #####  UNION  #################
                 params={
                   'INPUT': inpblayer,
                   'OVERLAY': refblayer,
-                  'OUTPUT':'/home/havatv/union' + str(radius) + '.shp'
-                  #'OUTPUT':'memory:'
+                  #'OUTPUT':'/home/havatv/union' + str(radius) + '.shp'
+                  'OUTPUT':'memory:'
                 }
                 buffcomb = processing.run(unionalg,params)
-                unionlayer = QgsProcessingUtils.mapLayerFromString(buffcomb['OUTPUT'],plugincontext)
-                self.showInfo('Union buffer #features: ' + str(unionlayer.featureCount()))
+                #unionlayer = QgsProcessingUtils.mapLayerFromString(buffcomb['OUTPUT'],plugincontext)
+                unionlayer = buffcomb['OUTPUT']
                 self.showInfo('Union finished')
+                self.showInfo('Union buffer #features: ' + str(unionlayer.featureCount()))
                 self.showInfo('buffcomb: ' + str(buffcomb['OUTPUT']))
 
                 provider=unionlayer.dataProvider()
@@ -275,28 +259,18 @@ class BOSDialog(QDialog, FORM_CLASS):
                 provider.addAttributes([QgsField('Combined', QVariant.String, len=40)])
                 unionlayer.updateFields()
                 unionlayer.startEditing()
-                #area_field_index = provider.fieldNameIndex('Area')
                 area_field_index = unionlayer.fields().lookupField('Area') # OK
                 self.showInfo('union, area field index: ' + str(area_field_index))
-                #area_field_index = unionalllayer.fieldNameIndex('Area')
-                #combined_field_index = provider.fields().lookupField('Combined')
                 combined_field_index = unionlayer.fields().lookupField('Combined') # OK
                 self.showInfo('union, combined field index: ' + str(combined_field_index))
-                #combined_field_index = unionalllayer.fieldNameIndex('Combined')
                 for f in provider.getFeatures():
                     #self.showInfo('Feature: ' + str(f))
                     area = f.geometry().area()
                     unionlayer.changeAttributeValue(f.id(), area_field_index, area)
-                    #iidx = provider.fieldNameIndex('InputB')
                     iidx = unionlayer.fields().lookupField('InputB')
-                    #iidx = unionalllayer.fieldNameIndex('InputB')
-                    #ridx = provider.fieldNameIndex('RefB')
                     ridx = unionlayer.fields().lookupField('RefB')
-                    #ridx = unionalllayer.fieldNameIndex('RefB')
-                #    cidx = provider.fieldNameIndex('CoverL')
                     i = f.attributes()[iidx]
                     r = f.attributes()[ridx]
-                #    c = f.attributes()[cidx]
                     # Set the 'Combined' attribute value to show the combination
                     comb = ''
                     if i is not None:
@@ -317,12 +291,15 @@ class BOSDialog(QDialog, FORM_CLASS):
                 # Count the number of polygons
                 params={
                   'INPUT': unionlayer,
-                  'OUTPUT':'/home/havatv/singlepart' + str(radius) + '.shp'
-                  #'OUTPUT':'memory:'
+                  #'OUTPUT':'/home/havatv/singlepart' + str(radius) + '.shp'
+                  'OUTPUT':'memory:'
                 }
                 singleunion = processing.run(multitosinglealg,params)
-                singlelayer = QgsProcessingUtils.mapLayerFromString(singleunion['OUTPUT'],plugincontext)
-                xoqiquery = "\"Combined\"='NULLR'"
+                #singlelayer = QgsProcessingUtils.mapLayerFromString(singleunion['OUTPUT'],plugincontext)
+                singlelayer = singleunion['OUTPUT']
+                self.showInfo('Polygon count finished')
+                xoqiquery = "\"Combined\"='R'"
+                #xoqiquery = "\"Combined\"='NULLR'"
                 singlelayer.selectByExpression (xoqiquery)
                 polycountoi = singlelayer.selectedFeatureCount()
 
@@ -331,16 +308,15 @@ class BOSDialog(QDialog, FORM_CLASS):
                 params={
                   'INPUT': reflayer,
                   'OVERLAY': inpblayer,
-                  'OUTPUT':'/home/havatv/reflinpb' + str(radius) + '.shp'
+                  #'OUTPUT':'/home/havatv/reflinpb' + str(radius) + '.shp'
+                  'OUTPUT':'memory:'
                 }
                 reflineinpbuf = processing.run(intersectionalg,params)
-                reflineinpbuflayer = QgsProcessingUtils.mapLayerFromString(reflineinpbuf['OUTPUT'],plugincontext)
+                #reflineinpbuflayer = QgsProcessingUtils.mapLayerFromString(reflineinpbuf['OUTPUT'],plugincontext)
+                reflineinpbuflayer = reflineinpbuf['OUTPUT']
                 self.showInfo('Intersection finished')
                 self.showInfo('reflineinpbuf: ' + str(reflineinpbuf['OUTPUT']))
                 self.showInfo('Reference line Intersect input buffer #features: ' + str(reflineinpbuflayer.featureCount()))
-                #iiquery = "\"RefB\"='R'"
-                #lilinerefbuflayer.selectByExpression (iiquery)
-                #self.showInfo('Input line Union reference buffer selected #features: ' + str(lilinerefbuflayer.selectedFeatureCount()))
                 reflinelength = 0
                 for f in reflineinpbuflayer.getFeatures():
                     reflinelength = reflinelength + f.geometry().length()
@@ -354,16 +330,15 @@ class BOSDialog(QDialog, FORM_CLASS):
                 params={
                   'INPUT': inputlayer,
                   'OVERLAY': refblayer,
-                  'OUTPUT':'/home/havatv/inplrefb' + str(radius) + '.shp'
+                  #'OUTPUT':'/home/havatv/inplrefb' + str(radius) + '.shp'
+                  'OUTPUT':'memory:'
                 }
                 inplinerefbuf = processing.run(differencealg,params)
-                inplinerefbuflayer = QgsProcessingUtils.mapLayerFromString(inplinerefbuf['OUTPUT'],plugincontext)
+                #inplinerefbuflayer = QgsProcessingUtils.mapLayerFromString(inplinerefbuf['OUTPUT'],plugincontext)
+                inplinerefbuflayer = inplinerefbuf['OUTPUT']
                 self.showInfo('Difference finished')
-                self.showInfo('inlinerefbuf: ' + str(inplinerefbuf['OUTPUT']))
+                #self.showInfo('inlinerefbuf: ' + str(inplinerefbuf['OUTPUT']))
                 self.showInfo('Input line Intersect reference buffer #features: ' + str(inplinerefbuflayer.featureCount()))
-                #iiquery = "\"RefB\"='R'"
-                #lilinerefbuflayer.selectByExpression (iiquery)
-                #self.showInfo('Input line Union reference buffer selected #features: ' + str(lilinerefbuflayer.selectedFeatureCount()))
                 inplinelength = 0
                 for f in inplinerefbuflayer.getFeatures():
                     inplinelength = inplinelength + f.geometry().length()
@@ -445,48 +420,25 @@ class BOSDialog(QDialog, FORM_CLASS):
       if len(stats) == 0:
         return
       try:
-        #BOSGraphicsView
-        self.BOSscene.clear()
-        viewprect = QRectF(self.BOSGraphicsView.viewport().rect())
-        self.BOSGraphicsView.setSceneRect(viewprect)
-        bottom = self.BOSGraphicsView.sceneRect().bottom()
-        top = self.BOSGraphicsView.sceneRect().top()
-        left = self.BOSGraphicsView.sceneRect().left()
-        right = self.BOSGraphicsView.sceneRect().right()
-        height = bottom - top
-        width = right - left
-        size = width
-        self.showInfo("Top: " + str(top) + " Bottom: " + str(bottom) + " Left: " + str(left))
-        if width > height:
-            size = height
-        padding = 3
-        padleft = 23
-        padright = 6
-        padbottom = 10
-        padtop = 25
-
-        minx = padleft
-        maxx = width - padright
-        xsize = maxx - minx
-        miny = padtop
-        maxy = height - padbottom
-        ysize = maxy - miny
         maxval = 0
         maxsize = 0
         sizes = []
         normoiirsizes = []
         normiiirsizes = []
         normiiorsizes = []
-        sums = []
         for stat in stats:
             sizet, sizestats, polycount, completeness, miscodings = stat
+            #self.showInfo("sizestats: " + str(sizestats))
             size = float(sizet)
             sizes.append(size)
             #oiir, iiir, iior = sizestats
             try:
-                oiir = float(sizestats['NULLR'])
+                # attr values depend on output format...
+                oiir = float(sizestats['R'])
+                #oiir = float(sizestats['NULLR'])
                 iiir = float(sizestats['IR'])
-                iior = float(sizestats['INULL'])
+                iior = float(sizestats['I'])
+                #iior = float(sizestats['INULL'])
             except:
                 import traceback
                 self.showError(traceback.format_exc())
@@ -506,6 +458,49 @@ class BOSDialog(QDialog, FORM_CLASS):
             if maxsize < size:
                 maxsize = size
         self.showInfo("Maxval: " + str(maxval) + " Maxsize: " + str(maxsize) + " Steps: " + str(len(sizes)))
+
+        self.BOSscene.clear()
+        viewprect = QRectF(self.BOSGraphicsView.viewport().rect())
+        self.BOSGraphicsView.setSceneRect(viewprect)
+        bottom = self.BOSGraphicsView.sceneRect().bottom()
+        top = self.BOSGraphicsView.sceneRect().top()
+        left = self.BOSGraphicsView.sceneRect().left()
+        right = self.BOSGraphicsView.sceneRect().right()
+        height = bottom - top
+        width = right - left
+        size = width
+        self.showInfo("Top: " + str(top) + " Bottom: " + str(bottom) + " Left: " + str(left))
+        if width > height:
+            size = height
+        padding = 3
+
+        # Calculate the left padding
+        label = QGraphicsTextItem()
+        font = QFont()
+        font.setPointSize(self.labelTextSize)
+        label.setFont(font)
+        label.setPlainText('100%')
+        padleft = label.boundingRect().width() - 4
+        #lheight = label.boundingRect().height()
+        #padleft = 23
+        # Calculate the right padding
+        labeltext = '{:.1e}'. format(float(maxsize))
+        label = QGraphicsTextItem()
+        label.setPlainText(labeltext)
+        font = QFont()
+        font.setPointSize(self.labelTextSize)
+        label.setFont(font)
+        padright = label.boundingRect().width()/2 - 10
+        #padright = 6
+        padbottom = self.labelTextSize + 4
+        padtop = self.titleTextSize * 2 + 4
+
+        minx = padleft
+        maxx = width - padright
+        xsize = maxx - minx
+        miny = padtop
+        maxy = height - padbottom
+        ysize = maxy - miny
         # Prepare the graph
         boundingbox = QRect(padleft,padtop,xsize,ysize)
         #rectangle = QRectF(self.BOSGraphicsView.mapToScene(boundingbox))
@@ -516,14 +511,13 @@ class BOSDialog(QDialog, FORM_CLASS):
         labeltext = str("BOS - Displacements")
         label = QGraphicsTextItem()
         font = QFont()
-        font.setPointSize(10)
+        font.setPointSize(self.titleTextSize)
         label.setFont(font)
         label.setPlainText(labeltext)
         lwidth = label.boundingRect().width()
         lheight = label.boundingRect().height()
         label.setPos((minx+maxx)/2 - lwidth/2, padtop/2 - lheight/2)
         self.BOSscene.addItem(label)
-
 
         # Add vertical lines
         startx = padleft
@@ -537,6 +531,7 @@ class BOSDialog(QDialog, FORM_CLASS):
         line = QGraphicsLineItem(QLineF(start, end))
         line.setPen(QPen(QColor(204, 204, 204)))
         self.BOSscene.addItem(line)
+        # Vertical lines
         for i in range(len(sizes)):
             size = sizes[i]
             startx = padleft + xsize * size / maxsize
@@ -550,15 +545,17 @@ class BOSDialog(QDialog, FORM_CLASS):
             line = QGraphicsLineItem(QLineF(start, end))
             line.setPen(QPen(QColor(204, 204, 204)))
             self.BOSscene.addItem(line)
-            labeltext = str(sizes[i])
+            #labeltext = str(sizes[i])
+            #labeltext = '{:.1e}'.format(sizetext)
+            labeltext = '{:.1f}'.format(sizes[i])
             label = QGraphicsTextItem()
-            font = QFont()
-            font.setPointSize(6)
-            label.setFont(font)
-            label.setPos(startx-6,ysize+padtop-4)
             label.setPlainText(labeltext)
+            font = QFont()
+            font.setPointSize(self.labelTextSize)
+            label.setFont(font)
+            lwidth = label.boundingRect().width()
+            label.setPos(startx - lwidth/2, ysize+padtop-4)
             self.BOSscene.addItem(label)
-
         # Add horizontal lines
         for i in range(11):
             startx = padleft
@@ -575,10 +572,10 @@ class BOSDialog(QDialog, FORM_CLASS):
             labeltext = str((10-i)*10)+'%'
             label = QGraphicsTextItem()
             font = QFont()
-            font.setPointSize(6)
+            font.setPointSize(self.labelTextSize)
             label.setFont(font)
             #label.setPos(-2,ysize-starty+padtop-4)
-            label.setPos(-2,starty-10)
+            label.setPos(-2,starty-self.labelTextSize/2-5)
             label.setPlainText(labeltext)
             self.BOSscene.addItem(label)
         # Plot Outside input, Inside reference
@@ -643,24 +640,47 @@ class BOSDialog(QDialog, FORM_CLASS):
               self.BOSscene.addItem(line)
             prevx = size
             prevy = value
-        # Do completeness
-        #plotCompleteness()    
-
       except:
         import traceback
         #self.showInfo("Error plotting")
         self.showInfo(traceback.format_exc())
 
 
-
-
-    # Very incomplete!
+    # Average Displacement
     def showAverageDisplacement(self):
       stats = self.statistics
       if len(stats) == 0:
         return
       try:
-        #BOSGraphicsView
+        maxval = 0
+        maxsize = 0
+        sizes = []
+        avgdisplacements = []
+        for stat in stats:
+            sizet, sizestats, polycount, completeness, miscodings = stat
+            size = float(sizet)
+            buffersize = size
+            sizes.append(size)
+            #oiir, iiir, iior = sizestats
+            try:
+                oiir = float(sizestats['R'])
+                iiir = float(sizestats['IR'])
+                iior = float(sizestats['I'])
+            except:
+                import traceback
+                self.showError(traceback.format_exc())
+                self.showInfo("Some measures are not available!")
+                return
+            suminputbuffer = iiir + iior  # The complete input buffer
+            avgdisp = math.pi/2.0 * 2 * buffersize * oiir / suminputbuffer
+            avgdisplacements.append(avgdisp)
+            self.showInfo("avgdisp: " + str(avgdisp))
+            if maxval < avgdisp:
+                maxval = avgdisp
+            if maxsize < size:
+                maxsize = size
+        self.showInfo("Maxval: " + str(maxval) + " Maxsize: " + str(maxsize) + " Steps: " + str(len(sizes)))
+
         self.BOSscene.clear()
         viewprect = QRectF(self.BOSGraphicsView.viewport().rect())
         self.BOSGraphicsView.setSceneRect(viewprect)
@@ -674,10 +694,26 @@ class BOSDialog(QDialog, FORM_CLASS):
         if width > height:
             size = height
         padding = 3
-        padleft = 30
-        padright = 6
-        padbottom = 10
-        padtop = 25
+        # Calculate the left padding
+        labeltext = '{:.1e}'. format(float(maxval))
+        label = QGraphicsTextItem()
+        font = QFont()
+        font.setPointSize(self.labelTextSize)
+        label.setFont(font)
+        label.setPlainText(labeltext)
+        padleft = label.boundingRect().width() - 4
+        #padleft = 30
+        # Calculate the right padding
+        labeltext = '{:.1e}'. format(float(maxsize))
+        label = QGraphicsTextItem()
+        label.setPlainText(labeltext)
+        font = QFont()
+        font.setPointSize(self.labelTextSize)
+        label.setFont(font)
+        padright = label.boundingRect().width()/2 - 10
+        #padright = 6
+        padbottom = self.labelTextSize + 4
+        padtop = self.titleTextSize * 2 + 4
 
         minx = padleft
         maxx = width - padright
@@ -685,53 +721,21 @@ class BOSDialog(QDialog, FORM_CLASS):
         miny = padtop
         maxy = height - padbottom
         ysize = maxy - miny
-        maxval = 0
-        maxsize = 0
-        sizes = []
-        avgdisplacements = []
-        sums = []
-        for stat in stats:
-            sizet, sizestats, polycount, completeness, miscodings = stat
-            size = float(sizet)
-            buffersize = size
-            sizes.append(size)
-            #oiir, iiir, iior = sizestats
-            try:
-                oiir = float(sizestats['NULLR'])
-                iiir = float(sizestats['IR'])
-                iior = float(sizestats['INULL'])
-            except:
-                import traceback
-                self.showError(traceback.format_exc())
-                self.showInfo("Some measures are not available!")
-                return
-
-            suminputbuffer = iiir + iior  # The complete input buffer
-            avgdisp = math.pi/2.0 * 2 * buffersize * oiir / suminputbuffer
-            avgdisplacements.append(avgdisp)
-            self.showInfo("avgdisp: " + str(avgdisp))
-            if maxval < avgdisp:
-                maxval = avgdisp
-            if maxsize < size:
-                maxsize = size
-        self.showInfo("Maxval: " + str(maxval) + " Maxsize: " + str(maxsize) + " Steps: " + str(len(sizes)))
         # Prepare the graph
         boundingbox = QRect(padleft,padtop,xsize,ysize)
         #rectangle = QRectF(self.BOSGraphicsView.mapToScene(boundingbox))
         #rectangle = self.BOSGraphicsView.mapToScene(boundingbox)
         #self.BOSscene.addRect(rectangle)
-
         labeltext = str("BOS - Average displacement")
         label = QGraphicsTextItem()
         font = QFont()
-        font.setPointSize(10)
+        font.setPointSize(self.titleTextSize)
         label.setFont(font)
         label.setPlainText(labeltext)
         lwidth = label.boundingRect().width()
         lheight = label.boundingRect().height()
         label.setPos((minx+maxx)/2 - lwidth/2, padtop/2 - lheight/2)
         self.BOSscene.addItem(label)
-
         # Add vertical lines
         startx = padleft
         starty = padtop
@@ -757,13 +761,16 @@ class BOSDialog(QDialog, FORM_CLASS):
             line = QGraphicsLineItem(QLineF(start, end))
             line.setPen(QPen(QColor(204, 204, 204)))
             self.BOSscene.addItem(line)
-            labeltext = str(sizes[i])
+            #labeltext = str(sizes[i])
+            labeltext = '{:.1f}'.format(sizes[i])
             label = QGraphicsTextItem()
-            font = QFont()
-            font.setPointSize(6)
-            label.setFont(font)
-            label.setPos(startx-6,ysize+padtop-4)
             label.setPlainText(labeltext)
+            font = QFont()
+            font.setPointSize(self.labelTextSize)
+            label.setFont(font)
+            lwidth = label.boundingRect().width()
+            label.setPos(startx - lwidth/2, ysize+padtop-4)
+            #label.setPos(startx-6,ysize+padtop-4)
             self.BOSscene.addItem(label)
         # Add horizontal lines (needs refinement!)
         for i in range(11):
@@ -778,11 +785,11 @@ class BOSDialog(QDialog, FORM_CLASS):
             line = QGraphicsLineItem(QLineF(start, end))
             line.setPen(QPen(QColor(204, 204, 204)))
             self.BOSscene.addItem(line)
-            labeltext = str(i*maxval/10)
+            #labeltext = str(i*maxval/10)
             labeltext = '{:.1e}'. format(float((10-i)*maxval/10))
             label = QGraphicsTextItem()
             font = QFont()
-            font.setPointSize(6)
+            font.setPointSize(self.labelTextSize)
             label.setFont(font)
             #label.setPos(-2,ysize-starty+padtop-4)
             label.setPos(-2,starty-10)
@@ -810,20 +817,35 @@ class BOSDialog(QDialog, FORM_CLASS):
               self.BOSscene.addItem(line)
             prevx = size
             prevy = value
-
       except:
         import traceback
         #self.showInfo("Error plotting")
         self.showInfo(traceback.format_exc())
 
 
-
+    # Oscillation
     def showOscillation(self):
       stats = self.statistics
       if len(stats) == 0:
         return
       try:
-        #BOSGraphicsView
+        maxval = 0
+        maxsize = 0
+        sizes = []
+        polycounts = []
+        for stat in stats:
+            sizet, sizestats, polycount, completeness, miscodings = stat
+            size = float(sizet)
+            buffersize = size
+            sizes.append(size)
+            polycounts.append(polycount)
+            self.showInfo("polycount: " + str(polycount))
+            if maxval < polycount:
+                maxval = polycount
+            if maxsize < size:
+                maxsize = size
+        self.showInfo("Maxval: " + str(maxval) + " Maxsize: " + str(maxsize) + " Steps: " + str(len(sizes)))
+
         self.BOSscene.clear()
         viewprect = QRectF(self.BOSGraphicsView.viewport().rect())
         self.BOSGraphicsView.setSceneRect(viewprect)
@@ -837,10 +859,28 @@ class BOSDialog(QDialog, FORM_CLASS):
         if width > height:
             size = height
         padding = 3
-        padleft = 30
-        padright = 6
-        padbottom = 10
-        padtop = 25
+        # Calculate the left padding
+        labeltext = '{:.1e}'. format(float(maxval))
+        label = QGraphicsTextItem()
+        font = QFont()
+        font.setPointSize(self.labelTextSize)
+        label.setFont(font)
+        label.setPlainText(labeltext)
+        padleft = label.boundingRect().width() - 4
+        #padleft = 30
+        # Calculate the right padding
+        labeltext = '{:.1e}'. format(float(maxsize))
+        label = QGraphicsTextItem()
+        label.setPlainText(labeltext)
+        font = QFont()
+        font.setPointSize(self.labelTextSize)
+        label.setFont(font)
+        padright = label.boundingRect().width()/2 - 10
+        #padright = 6
+        padbottom = self.labelTextSize + 4
+        padtop = self.titleTextSize * 2 + 4
+        #padbottom = 10
+        #padtop = 25
 
         minx = padleft
         maxx = width - padright
@@ -848,38 +888,19 @@ class BOSDialog(QDialog, FORM_CLASS):
         miny = padtop
         maxy = height - padbottom
         ysize = maxy - miny
-        maxval = 0
-        maxsize = 0
-        sizes = []
-        polycounts = []
-        sums = []
-        for stat in stats:
-            sizet, sizestats, polycount, completeness, miscodings = stat
-            size = float(sizet)
-            buffersize = size
-            sizes.append(size)
-            polycounts.append(polycount)
-            self.showInfo("polycount: " + str(polycount))
-            if maxval < polycount:
-                maxval = polycount
-            if maxsize < size:
-                maxsize = size
-        self.showInfo("Maxval: " + str(maxval) + " Maxsize: " + str(maxsize) + " Steps: " + str(len(sizes)))
         # Prepare the graph
         boundingbox = QRect(padleft,padtop,xsize,ysize)
-
         # Label for the heading
         labeltext = str("BOS - Oscillation")
         label = QGraphicsTextItem()
         font = QFont()
-        font.setPointSize(10)
+        font.setPointSize(self.titleTextSize)
         label.setFont(font)
         label.setPlainText(labeltext)
         lwidth = label.boundingRect().width()
         lheight = label.boundingRect().height()
         label.setPos((minx+maxx)/2 - lwidth/2, padtop/2 - lheight/2)
         self.BOSscene.addItem(label)
-
         # Add vertical lines
         startx = padleft
         starty = padtop
@@ -905,13 +926,16 @@ class BOSDialog(QDialog, FORM_CLASS):
             line = QGraphicsLineItem(QLineF(start, end))
             line.setPen(QPen(QColor(204, 204, 204)))
             self.BOSscene.addItem(line)
-            labeltext = str(sizes[i])
+            #labeltext = str(sizes[i])
+            labeltext = '{:.1f}'.format(sizes[i])
             label = QGraphicsTextItem()
-            font = QFont()
-            font.setPointSize(6)
-            label.setFont(font)
-            label.setPos(startx-6,ysize+padtop-4)
             label.setPlainText(labeltext)
+            font = QFont()
+            font.setPointSize(self.labelTextSize)
+            label.setFont(font)
+            lwidth = label.boundingRect().width()
+            label.setPos(startx - lwidth/2, ysize+padtop-4)
+            #label.setPos(startx-6,ysize+padtop-4)
             self.BOSscene.addItem(label)
         # Add horizontal lines (needs refinement!)
         for i in range(11):
@@ -926,11 +950,11 @@ class BOSDialog(QDialog, FORM_CLASS):
             line = QGraphicsLineItem(QLineF(start, end))
             line.setPen(QPen(QColor(204, 204, 204)))
             self.BOSscene.addItem(line)
-            labeltext = str(i*maxval/10)
+            #labeltext = str(i*maxval/10)
             labeltext = '{:.1e}'. format(float((10-i)*maxval/10))
             label = QGraphicsTextItem()
             font = QFont()
-            font.setPointSize(6)
+            font.setPointSize(self.labelTextSize)
             label.setFont(font)
             #label.setPos(-2,ysize-starty+padtop-4)
             label.setPos(-2,starty-10)
@@ -965,12 +989,29 @@ class BOSDialog(QDialog, FORM_CLASS):
         self.showInfo(traceback.format_exc())
 
 
+    # Completeness and Miscodings
     def showComplenessMiscoding(self):
       stats = self.statistics
       if len(stats) == 0:
         return
       try:
-        #BOSGraphicsView
+        maxval = 1
+        maxsize = 0
+        sizes = []
+        completenessv = []
+        miscodingsv = []
+        for stat in stats:
+            sizet, sizestats, polycount, completeness, miscodings = stat
+            size = float(sizet)
+            buffersize = size
+            sizes.append(size)
+            completenessv.append(completeness)
+            miscodingsv.append(miscodings)
+            self.showInfo("completeness: " + str(completeness))
+            self.showInfo("miscodings: " + str(miscodings))
+            if maxsize < size:
+                maxsize = size
+        self.showInfo("Maxval: " + str(maxval) + " Maxsize: " + str(maxsize) + " Steps: " + str(len(sizes)))
         self.BOSscene.clear()
         viewprect = QRectF(self.BOSGraphicsView.viewport().rect())
         self.BOSGraphicsView.setSceneRect(viewprect)
@@ -984,10 +1025,27 @@ class BOSDialog(QDialog, FORM_CLASS):
         if width > height:
             size = height
         padding = 3
-        padleft = 23
-        padright = 6
-        padbottom = 10
-        padtop = 25
+        # Calculate the left padding
+        label = QGraphicsTextItem()
+        font = QFont()
+        font.setPointSize(self.labelTextSize)
+        label.setFont(font)
+        label.setPlainText('100%')
+        padleft = label.boundingRect().width() - 4
+        #padleft = 23
+        # Calculate the right padding
+        labeltext = '{:.1e}'. format(float(maxsize))
+        label = QGraphicsTextItem()
+        label.setPlainText(labeltext)
+        font = QFont()
+        font.setPointSize(self.labelTextSize)
+        label.setFont(font)
+        padright = label.boundingRect().width()/2 - 10
+        #padright = 6
+        padbottom = self.labelTextSize + 4
+        padtop = self.titleTextSize * 2 + 4
+        #padbottom = 10
+        #padtop = 25
 
         minx = padleft
         maxx = width - padright
@@ -995,41 +1053,18 @@ class BOSDialog(QDialog, FORM_CLASS):
         miny = padtop
         maxy = height - padbottom
         ysize = maxy - miny
-        maxval = 1
-        maxsize = 0
-        sizes = []
-        completenessv = []
-        miscodingsv = []
-        sums = []
-        for stat in stats:
-            sizet, sizestats, polycount, completeness, miscodings = stat
-            size = float(sizet)
-            buffersize = size
-            sizes.append(size)
-            completenessv.append(completeness)
-            miscodingsv.append(miscodings)
-            self.showInfo("completeness: " + str(completeness))
-            self.showInfo("miscodings: " + str(miscodings))
-            #if maxval < completeness:
-            #    maxval = completeness
-            #if maxval < miscodings:
-            #    maxval = miscodings
-            if maxsize < size:
-                maxsize = size
-        self.showInfo("Maxval: " + str(maxval) + " Maxsize: " + str(maxsize) + " Steps: " + str(len(sizes)))
         # Prepare the graph
         boundingbox = QRect(padleft,padtop,xsize,ysize)
         labeltext = str("BOS - Completeness / Miscodings")
         label = QGraphicsTextItem()
         font = QFont()
-        font.setPointSize(10)
+        font.setPointSize(self.titleTextSize)
         label.setFont(font)
         label.setPlainText(labeltext)
         lwidth = label.boundingRect().width()
         lheight = label.boundingRect().height()
         label.setPos((minx+maxx)/2 - lwidth/2, padtop/2 - lheight/2)
         self.BOSscene.addItem(label)
-
         # Add vertical lines
         startx = padleft
         starty = padtop
@@ -1055,13 +1090,16 @@ class BOSDialog(QDialog, FORM_CLASS):
             line = QGraphicsLineItem(QLineF(start, end))
             line.setPen(QPen(QColor(204, 204, 204)))
             self.BOSscene.addItem(line)
-            labeltext = str(sizes[i])
+            #labeltext = str(sizes[i])
+            labeltext = '{:.1f}'.format(sizes[i])
             label = QGraphicsTextItem()
-            font = QFont()
-            font.setPointSize(6)
-            label.setFont(font)
-            label.setPos(startx-6,ysize+padtop-4)
             label.setPlainText(labeltext)
+            font = QFont()
+            font.setPointSize(self.labelTextSize)
+            label.setFont(font)
+            lwidth = label.boundingRect().width()
+            label.setPos(startx - lwidth/2, ysize+padtop-4)
+            #label.setPos(startx-6,ysize+padtop-4)
             self.BOSscene.addItem(label)
         # Add horizontal lines (needs refinement!)
         for i in range(11):
@@ -1081,7 +1119,7 @@ class BOSDialog(QDialog, FORM_CLASS):
             labeltext = str((10-i)*10)+'%'
             label = QGraphicsTextItem()
             font = QFont()
-            font.setPointSize(6)
+            font.setPointSize(self.labelTextSize)
             label.setFont(font)
             #label.setPos(-2,ysize-starty+padtop-4)
             label.setPos(-2,starty-10)
