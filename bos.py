@@ -80,8 +80,8 @@ class BOS:
         self.BOS = self.tr(u'BOS')
         self.BOSAMP = self.tr(u'&BOS')
         # TODO: We are going to let the user set this up in a future iteration
-        self.toolbar = self.iface.addToolBar(self.BOS)
-        self.toolbar.setObjectName(self.BOS)
+        #self.toolbar = self.iface.addToolBar(self.BOS)
+        #self.toolbar.setObjectName(self.BOS)
 
     # noinspection PyMethodMayBeStatic
     def tr(self, message):
@@ -164,8 +164,12 @@ class BOS:
             action.setWhatsThis(whats_this)
 
         if add_to_toolbar:
-            self.toolbar.addAction(action)
-
+            #self.toolbar.addAction(action)
+            ## Add toolbar icon
+            if hasattr(self.iface, 'addVectorToolBarIcon'):
+                self.iface.addVectorToolBarIcon(action)
+            else:
+                self.iface.addToolBarIcon(self.action)
         if add_to_menu and hasattr(self.iface, 'addPluginToVectorMenu'):
             self.iface.addPluginToVectorMenu(
                 self.BOSAMP,
@@ -193,9 +197,13 @@ class BOS:
                 self.iface.removePluginVectorMenu(
                     self.BOSAMP,
                     action)
-            self.iface.removeToolBarIcon(action)
+            if hasattr(self.iface, 'removeVectorToolBarIcon'):
+                self.iface.removeVectorToolBarIcon(action)
+            else:
+                self.iface.removeToolBarIcon(action)
+            #self.iface.removeToolBarIcon(action)
         # remove the toolbar
-        del self.toolbar
+        #del self.toolbar
 
 
     def run(self):

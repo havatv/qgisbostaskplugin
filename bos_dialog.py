@@ -20,23 +20,13 @@
  *                                                                         *
  ***************************************************************************/
 """
-
+from functools import partial
 from os.path import dirname
 from os.path import join
 #import os
 
-#2# from PyQt4 import uic
-#2# from PyQt4.QtCore import QThread
-#2# from PyQt4.QtCore import Qt
-#QObject, 
-#from PyQt4.QtCore import QCoreApplication, QUrl
-#2# from PyQt4.QtGui import QDialog, QDialogButtonBox
-#2# from PyQt4.QtGui import QProgressBar
-#2# from PyQt4.QtGui import QMessageBox
-#2# from PyQt4.QtGui import QPushButton
 from qgis.PyQt import uic
 from qgis.PyQt.QtCore import QCoreApplication, QObject, QThread
-#from qgis.PyQt.QtGui import QStandardItem, QStandardItemModel
 from qgis.PyQt.QtWidgets import QDialog, QDialogButtonBox
 from qgis.PyQt.QtWidgets import QPushButton, QProgressBar, QMessageBox
 from qgis.PyQt.QtCore import Qt
@@ -44,25 +34,19 @@ from qgis.PyQt.QtCore import Qt
 from qgis.core import QgsProcessingAlgRunnerTask   # ok
 from qgis.core import QgsApplication   # ok
 from qgis.core import QgsProcessingContext  # thread manipulation?
+from qgis.core import QgsProcessingFeedback
 
-
-#2# from qgis.core import QgsMessageLog, QgsMapLayerRegistry
+#from qgis.core import QgsTaskManager  # Added (http://www.opengis.ch/2018/06/22/threads-in-pyqgis3/)
+ 
 from qgis.core import Qgis
-#from qgis.core import QgsMapLayer
-from qgis.gui import QgsMessageBar
 
 from qgis.core import QgsMessageLog, QgsProject
-#, QgsWkbTypes
-#from qgis.core import QgsVectorFileWriter, QgsVectorLayer
-#from qgis.utils import showPluginHelp
 
 #from sys.path import append
 #append(dirname(__file__))
 
 from processing.tools import dataobjects
 
-
-from .bos_engine import Worker
 
 FORM_CLASS, _ = uic.loadUiType(join(
     dirname(__file__), 'bos_dialog_base.ui'))
@@ -100,8 +84,10 @@ class BOSDialog(QDialog, FORM_CLASS):
         # Connect signals
         okButton.clicked.connect(self.startWorker)
 
+
+
     def startWorker(self):
-        """Initialises and starts the worker thread."""
+        """Initialises and starts."""
         try:
             layerindex = self.inputLayer.currentIndex()
             layerId = self.inputLayer.itemData(layerindex)
@@ -127,6 +113,14 @@ class BOSDialog(QDialog, FORM_CLASS):
             if reflayer is not None and reflayer.sourceCrs().isGeographic():
                 self.showWarning('Geographic CRS used for the reference layer -'
                                  ' computations will be in decimal degrees!')
+            # Algorithms
+            bufferalg=QgsApplication.processingRegistry().algorithmById('native:buffer')
+            #bufferalg=QgsApplication.processingRegistry().algorithmById('qgis:buffer')
+            unionalg=QgsApplication.processingRegistry().algorithmById('qgis:union')
+            intersectionalg=QgsApplication.processingRegistry().algorithmById('qgis:intersection')
+            differencealg=QgsApplication.processingRegistry().algorithmById('qgis:difference')
+            multitosinglealg=QgsApplication.processingRegistry().algorithmById('qgis:multiparttosingleparts')
+            statalg=QgsApplication.processingRegistry().algorithmById('qgis:statisticsbycategories')
             #outputlayername = self.outputDataset.text()
             #approximateinputgeom = self.approximate_input_geom_cb.isChecked()
             #joinprefix = self.joinPrefix.text()
@@ -141,78 +135,99 @@ class BOSDialog(QDialog, FORM_CLASS):
             radii = []
             for step in range(steps):
                 radii.append(startradius + step * delta)
-            self.showInfo(str(radii))
-            radii = [10,20,50]
-            self.showInfo(str(radii))
+            #self.showInfo(str(radii))
+            #radii = [10,20,50]
+            #self.showInfo(str(radii))
+            feedback = QgsProcessingFeedback()
             selectedinputonly = self.selectedFeaturesCheckBox.isChecked()
             selectedrefonly = self.selectedRefFeaturesCheckBox.isChecked()
-            plugincontext = dataobjects.createContext()
-            # create a new worker instance
-            worker = Worker(inputlayer, reflayer, plugincontext, radii,
-                            selectedinputonly, selectedrefonly)
-            # configure the QgsMessageBar
-            msgBar = self.iface.messageBar().createMessage(
-                                                self.tr('Starting'), '')
-            self.aprogressBar = QProgressBar()
-            self.aprogressBar.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-            acancelButton = QPushButton()
-            acancelButton.setText(self.CANCEL)
-            acancelButton.clicked.connect(self.killWorker)
-            msgBar.layout().addWidget(self.aprogressBar)
-            msgBar.layout().addWidget(acancelButton)
-            # Has to be popped after the thread has finished (in
-            # workerFinished).
-            self.iface.messageBar().pushWidget(msgBar,
-                                               Qgis.Info)
-            self.messageBar = msgBar
-            self.showInfo('GUI thread: ' + str(QThread.currentThread()) + ' ID: ' + str(QThread.currentThreadId()))
+            #plugincontext = dataobjects.createContext(feedback)
+            #self.showInfo('Plugin context: ' + str(plugincontext))
+            #self.showInfo('GUI thread: ' + str(QThread.currentThread()) + ' ID: ' + str(QThread.currentThreadId()))
 
             ###### Testing QgsTask!!!
+            # I følge oppskrifta på opengis.ch
             context = QgsProcessingContext()
-            self.showInfo('Context: ' + str(context))
+            #context = plugincontext
+            # context = None ## (arguement 3 has unexpected type 'NoneType')
+            #self.showInfo('Normal context: ' + str(context))
             #context.setProject(QgsProject.instance())
-            alg=QgsApplication.processingRegistry().algorithmById('native:buffer')
+            # I følge oppskrifta på opengis.ch:
+            #alg=QgsApplication.processingRegistry().algorithmById('native:buffer')
             #alg=QgsApplication.processingRegistry().algorithmById('qgis:buffer')
             #[p.name() for p in alg.parameterDefinitions()]
-            params={
-              #'INPUT': '32_0214vegsituasjon_linje',
-              'INPUT': inputlayer,
-              'DISTANCE': 100.0,
-              #'OUTPUT':'/home/havatv/test.shp'
-              'OUTPUT':'memory:'
-            }
-            #  QgsProcessingAlgorithm, QVariantMap, QgsProcessingContext, QgsProcessingFeedback
-            task = QgsProcessingAlgRunnerTask(alg,params,context)
-            self.showInfo('Task: ' + str(task))
-            #  connect()
-            #task.begun.connect(self.task_begun)
-            #task.taskCompleted.connect(self.task_completed)
-            #task.progressChanged.connect(self.progress)
-            #task.taskTerminated.connect(self.task_stopped)
+
+            for radius in radii:
+                # Buffer input
+                params={
+                  'INPUT': inputlayer,
+                  'DISTANCE': radius,
+                  #'OUTPUT':'/home/havatv/test.shp'
+                  'OUTPUT':'memory:Input buffer'
+                }
+                task = QgsProcessingAlgRunnerTask(bufferalg,params,context)
+                task.executed.connect(partial(self.task_executed, context, radius, 'input'))
+                QgsApplication.taskManager().addTask(task)
+                self.showInfo('Input buffer: ' + str(radius))
+                # Buffer reference
+                params={
+                  'INPUT': reflayer,
+                  'DISTANCE': radius,
+                  #'OUTPUT':'/home/havatv/test.shp'
+                  'OUTPUT':'memory:Reference buffer'
+                }
+                task = QgsProcessingAlgRunnerTask(bufferalg,params,context)
+                task.executed.connect(partial(self.task_executed, context, radius, 'reference'))
+                QgsApplication.taskManager().addTask(task)
+                self.showInfo('Ref buffer: ' + str(radius))
 
 
-            #QgsApplication.taskManager().addTask(task)  # Crasher qgis med trådproblemer
-            print('Buffer 1 startet')
+            #params={
+            #  'INPUT': inputlayer,
+            #  'DISTANCE': 100.0,
+            #  #'OUTPUT':'/home/havatv/test.shp'
+            #  'OUTPUT':'memory:Output buffer'
+            #}
 
+            ##  QgsProcessingAlgorithm, QVariantMap, QgsProcessingContext, QgsProcessingFeedback
+            ## Denne funker, men kræsjer etter at den er ferdig:
+            ##task = QgsProcessingAlgRunnerTask(alg,params,plugincontext)
+            ## Denne funker, men kræsjer etter at den er ferdig:
 
+            #task = QgsProcessingAlgRunnerTask(bufferalg,params,context) # kræsjer etter at algoritmen har kjørt ferdig
 
+            ## I følge oppskrifta på opengis.ch:
+            ##task = QgsProcessingAlgRunnerTask(alg,params,context,feedback)  # kræsjer ved oppstart
+            ##self.showInfo('Task: ' + str(task))
+            ##  connect()
+            ##task.begun.connect(self.task_begun)
+            ##task.taskCompleted.connect(self.task_completed)
+            ## Denne funker for mikrodatasett - ingen reaksjon for minidatasett:
+            ## kommer i tillegg til QGIS-progressbar på statuslinja
+            ##task.progressChanged.connect(self.task_progress)
+            ##task.taskTerminated.connect(self.task_stopped)
+            ##task.executed.connect(self.task_executed) # Crash
 
+            #iteration = 5   # Identifiserer hvilken iterasjon det er snakk om
 
+            ## I følge oppskrifta på opengis.ch (partial legger inn context som første parameter?):
 
-            # start the worker in a new thread
-            #thread = QThread(self)
-            #worker.moveToThread(thread)
-            #worker.finished.connect(self.workerFinished)
-            #worker.error.connect(self.workerError)
-            #worker.status.connect(self.workerInfo)
-            #worker.progress.connect(self.progressBar.setValue)
-            #worker.progress.connect(self.aprogressBar.setValue)
-            #thread.started.connect(worker.run)
-            #thread.start()
-            #self.thread = thread
-            #self.worker = worker
-            self.button_box.button(QDialogButtonBox.Ok).setEnabled(False)
-            self.button_box.button(QDialogButtonBox.Close).setEnabled(False)
+            #task.executed.connect(partial(self.task_executed, context, iteration))
+
+            ##task.executed.connect(partial(self.task_executed, feedback))  # Funker ikke - må ha context?
+            ## partial sets "context" as the first parameter - the first parameter of executed will then be given as the second parameter.
+
+            ##task.run()
+            ## Add the task to the task manager (is started ASAP)
+            ## I følge oppskrifta på opengis.ch
+
+            #QgsApplication.taskManager().addTask(task)  # Kræsjer qgis med trådproblemer
+
+            ## Kjører hele greia, men kræsjer ved avslutning.
+            #self.showInfo('Buffer 1 startet')  # Denne funker
+
+            ##self.button_box.button(QDialogButtonBox.Ok).setEnabled(False)
+            ##self.button_box.button(QDialogButtonBox.Close).setEnabled(False)
             self.button_box.button(QDialogButtonBox.Cancel).setEnabled(True)
         except:
             import traceback
@@ -221,67 +236,62 @@ class BOSDialog(QDialog, FORM_CLASS):
             pass
         # End of startworker
 
-    #def task_completed(self, ok, result)
-    #    
+    # Handle the result of the processing
+    # I følge oppskrifta på opengis.ch (funker med partial!)
+    #def task_executed(context, ok, result):
+    def task_executed(self, context, iteration, kind, ok, result): # funker også (med partial)
+    #def task_executed(self, ok, result):
+    #def task_executed(ok, result):
+        self.showInfo("Task executed: ")
+        self.showInfo("Iteration: " + str(iteration))
+        self.showInfo("Kind: " + str(kind))
+        self.showInfo("OK: " + str(ok))
+        self.showInfo("Res: " + str(result))
+        #self.showInfo("Context (encoding): " + str(context.defaultEncoding()))
+        #self.showInfo("Context (thread): " + str(context.thread()))
 
+    def task_completed(self, ok, result):
+        self.showInfo("Task completed")
 
-    def workerFinished(self, ok, ret):
-        """Handles the output from the worker and cleans up after the
-           worker has finished."""
-        # clean up the worker and thread
-        self.worker.deleteLater()
-        self.thread.quit()
-        self.thread.wait()
-        self.thread.deleteLater()
-        # remove widget from message bar (pop)
-        self.iface.messageBar().popWidget(self.messageBar)
-        if ok and ret is not None:
-            # report the result
-            stats = ret
-            self.showInfo(str(ret))
-            QgsMessageLog.logMessage(self.tr('BOS finished'),
-                                     self.BOS, Qgis.Info)
-        else:
-            # notify the user that something went wrong
-            if not ok:
-                self.showError(self.tr('Aborted') + '!')
-            else:
-                self.showError(self.tr('No layer created') + '!')
-        self.progressBar.setValue(0.0)
-        self.button_box.button(QDialogButtonBox.Ok).setEnabled(True)
-        self.button_box.button(QDialogButtonBox.Close).setEnabled(True)
-        self.button_box.button(QDialogButtonBox.Cancel).setEnabled(False)
-        # End of workerFinished
+    def task_begun(self):
+        self.showInfo("Task begun.")
 
-    def killWorker(self):
-        """Kill the worker thread."""
-        if self.worker is not None:
-            self.showInfo(self.tr('Killing worker'))
-            self.worker.kill()
+    def task_stopped(self):
+        self.showInfo("Task stopped.")
 
-    def workerError(self, exception_string):
-        """Report an error from the worker."""
-        self.showError(exception_string)
+    # Denne fungerer (blir kalt). Progressbar i statuslinja får samme data)
+    def task_progress(self, prog):
+        #self.showInfo("Task progress. " + str(prog))
+        return
 
-    def workerInfo(self, message_string):
-        """Report an info message from the worker."""
-        QgsMessageLog.logMessage(self.tr('Worker') + ': ' + message_string,
-                                 self.BOS, Qgis.Info)
+    #def workerFinished(self, ok, ret):
+    #    """Handles the output from the worker and cleans up after the
+    #       worker has finished."""
+    #    self.progressBar.setValue(0.0)
+    #    self.button_box.button(QDialogButtonBox.Ok).setEnabled(True)
+    #    self.button_box.button(QDialogButtonBox.Close).setEnabled(True)
+    #    self.button_box.button(QDialogButtonBox.Cancel).setEnabled(False)
+    #    # End of workerFinished
 
     def showError(self, text):
         """Show an error."""
-        self.iface.messageBar().pushMessage(self.tr('Error'), text,
-                                            level=Qgis.Critical,
-                                            duration=3)
         QgsMessageLog.logMessage('Error: ' + text, self.BOS,
                                  Qgis.Critical)
 
     def showInfo(self, text):
         """Show info."""
-        self.iface.messageBar().pushMessage(self.tr('Info'), text,
-                                            level=Qgis.Info,
-                                            duration=2)
         QgsMessageLog.logMessage('Info: ' + text, self.BOS,
                                  Qgis.Info)
 
+    # Implement the accept method to avoid exiting the dialog when
+    # starting the work
+    def accept(self):
+        """Accept override."""
+        pass
 
+    # Implement the reject method to have the possibility to avoid
+    # exiting the dialog when cancelling
+    def reject(self):
+        """Reject override."""
+        # exit the dialog
+        QDialog.reject(self)
