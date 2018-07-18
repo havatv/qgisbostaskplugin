@@ -29,6 +29,7 @@ import math
 
 from qgis.PyQt import uic
 from qgis.PyQt.QtCore import QCoreApplication, QObject, QThread
+from qgis.PyQt.QtCore import QVariant
 from qgis.PyQt.QtWidgets import QDialog, QDialogButtonBox
 #from qgis.PyQt.QtWidgets import QPushButton, QProgressBar, QMessageBox
 from qgis.PyQt.QtWidgets import QFileDialog
@@ -121,6 +122,7 @@ class BOSDialog(QDialog, FORM_CLASS):
         # Global variables for statistics
         # Number of polygons:
         self.polycount = {};
+        self.completeness = {};
 
 
 
@@ -157,6 +159,16 @@ class BOSDialog(QDialog, FORM_CLASS):
             self.differencealg=QgsApplication.processingRegistry().algorithmById('qgis:difference')
             self.multitosinglealg=QgsApplication.processingRegistry().algorithmById('qgis:multiparttosingleparts')
             statalg=QgsApplication.processingRegistry().algorithmById('qgis:statisticsbycategories')
+
+            # Calculate the total length of lines in the layers
+            self.inpgeomlength = 0
+            for f in inputlayer.getFeatures():
+                self.inpgeomlength = self.inpgeomlength + f.geometry().length()
+            self.refgeomlength = 0
+            for f in self.reflayer.getFeatures():
+                self.refgeomlength = self.refgeomlength + f.geometry().length()
+
+
             # Number of steps and radii
             steps = self.stepsSB.value()
             startradius = self.startRadiusSB.value()
@@ -255,10 +267,31 @@ class BOSDialog(QDialog, FORM_CLASS):
         # Testing...
         #blayer = result['OUTPUT'] ## blayer blir string!
         blayer = QgsProcessingUtils.mapLayerFromString(result['OUTPUT'], context)
-        fcnt = 0
-        for f in blayer.getFeatures():
-            fcnt = fcnt + 1
-        self.showInfo("Feature count: " + str(fcnt))
+        #fcnt = 0
+        #for f in blayer.getFeatures():
+        #    fcnt = fcnt + 1
+        #self.showInfo("Feature count: " + str(fcnt))
+
+        provider = blayer.dataProvider()
+        newfield = QgsField('InputB', QVariant.String, len=5)
+        if kind == self.REF:
+            newfield = QgsField('RefB', QVariant.String, len=5)
+        provider.addAttributes([newfield])
+        blayer.updateFields()
+        blayer.startEditing()
+        field_index = blayer.fields().lookupField('InputB')
+        if kind == self.REF:
+            field_index = blayer.fields().lookupField('RefB')
+        self.showInfo('refb, field index: ' + str(field_index))
+        # Set the attribute value to 'R'
+        for f in provider.getFeatures():
+            #self.showInfo('Feature (refb): ' + str(f))
+            if kind == self.REF:
+                blayer.changeAttributeValue(f.id(), field_index, 'R')
+            else:
+                blayer.changeAttributeValue(f.id(), field_index, 'I')
+        blayer.commitChanges()
+
         if kind == self.INPUT:
             self.inputbuffers[iteration] = result['OUTPUT']
         elif kind == self.REF:
@@ -270,8 +303,8 @@ class BOSDialog(QDialog, FORM_CLASS):
             params={
               'INPUT': self.reflayer,
               #'OVERLAY': result['OUTPUT'],
-              #'OVERLAY': blayer,
-              'OVERLAY': QgsProcessingUtils.mapLayerFromString(result['OUTPUT'], context),
+              'OVERLAY': blayer,
+              #'OVERLAY': QgsProcessingUtils.mapLayerFromString(result['OUTPUT'], context),
               'OUTPUT':'memory:Intersection'
             }
             task = QgsProcessingAlgRunnerTask(self.intersectionalg,params,context)
@@ -310,54 +343,6 @@ class BOSDialog(QDialog, FORM_CLASS):
     # end of buffer_executed
 
 
-    def tosingle_executed(self, context, iteration, kind, ok, result):
-        self.showInfo("To single executed: ")
-        self.showInfo("Iteration: " + str(iteration))
-        self.showInfo("Kind: " + str(kind))
-        self.showInfo("OK: " + str(ok))
-        self.showInfo("Res: " + str(result))
-        if not ok:
-            self.showInfo("MultipartToSinglepart failed - " + str(iteration) + ' ' + str(kind))
-            return
-
-        if kind == self.INPUT:
-            self.inputbuffers[iteration] = result['OUTPUT']
-        elif kind == self.REF:
-            self.referencebuffers[iteration] = result['OUTPUT']
-        else:
-            self.showInfo("Strange kind of buffer: " + str(kind))
-        # Do line overlay:
-        if kind == self.INPUT:
-            params={
-              'INPUT': self.reflayer,
-              'OVERLAY': result['OUTPUT'],
-              'OUTPUT':'memory:Intersection'
-            }
-            task = QgsProcessingAlgRunnerTask(self.intersectionalg,params,context)
-            # Add a few extra parameters (context, radius) using "partial"
-            task.executed.connect(partial(self.intersection_executed, context, iteration))
-            QgsApplication.taskManager().addTask(task)
-            self.showInfo('Start Intersection: ' + str(iteration))
-        #elif kind == self.REF:
-
-        # Check if both buffers are available:
-        for key in self.inputbuffers:
-            if key in self.referencebuffers:
-                # Union input
-                params={
-                  'INPUT': self.inputbuffers[key],
-                  'OVERLAY': self.referencebuffers[key],
-                  'OUTPUT':'memory:Union'
-                }
-                task = QgsProcessingAlgRunnerTask(self.unionalg,params,context)
-                # Add a few extra parameters (context, radius) using "partial"
-                task.executed.connect(partial(self.union_executed, context, iteration))
-                QgsApplication.taskManager().addTask(task)
-                self.showInfo('Start Union: ' + str(iteration))
-                del self.inputbuffers[key]
-                del self.referencebuffers[key]
-    # end of tosingle_executed
-
     def intersection_executed(self, context, iteration, ok, result):
         self.showInfo("Intersection executed: " + str(iteration) + ', OK: ' + str(ok) + ', Res: ' + str(result))
         #self.showInfo("Intersection executed: ")
@@ -365,10 +350,22 @@ class BOSDialog(QDialog, FORM_CLASS):
         #self.showInfo("OK: " + str(ok))
         #self.showInfo("Res: " + str(result))
 
-        # Count polygons that are outside the input buffer and
-        # inside the reference buffer.
 
-    # end of union_executed
+
+        # reference lines with input buffer (completeness)
+        reflineinpbuflayer = QgsProcessingUtils.mapLayerFromString(result['OUTPUT'], context)
+        #self.showInfo('Reference line Intersect input buffer #features: ' + str(reflineinpbuflayer.featureCount()))
+        reflinelength = 0
+        for f in reflineinpbuflayer.getFeatures():
+            reflinelength = reflinelength + f.geometry().length()
+        self.showInfo('Completeness: ' + str(reflinelength) + ' - ' + str(self.refgeomlength))
+        if self.refgeomlength > 0:
+           BOScompleteness = reflinelength / self.refgeomlength
+        else:
+           BOScompleteness = 0
+           self.showInfo('refgeomlength = 0!')
+        self.completeness[iteration] = BOScompleteness
+    # end of intersection_executed
 
     def union_executed(self, context, iteration, ok, result):
         self.showInfo("Union executed: " + str(iteration) + ', OK: ' + str(ok) + ', Res: ' + str(result))
@@ -379,22 +376,79 @@ class BOSDialog(QDialog, FORM_CLASS):
         if not ok:
             self.showInfo("Union failed - " + str(iteration))
             return
+        unionlayer = QgsProcessingUtils.mapLayerFromString(result['OUTPUT'], context)
+        provider=unionlayer.dataProvider()
+        provider.addAttributes([QgsField('Area', QVariant.Double)])
+        provider.addAttributes([QgsField('Combined', QVariant.String, len=40)])
+        unionlayer.updateFields()
+        unionlayer.startEditing()
+        area_field_index = unionlayer.fields().lookupField('Area') # OK
+        #self.showInfo('union, area field index: ' + str(area_field_index))
+        combined_field_index = unionlayer.fields().lookupField('Combined') # OK
+        #self.showInfo('union, combined field index: ' + str(combined_field_index))
+        for f in provider.getFeatures():
+            #self.showInfo('Feature: ' + str(f))
+            area = f.geometry().area()
+            unionlayer.changeAttributeValue(f.id(), area_field_index, area)
+            iidx = unionlayer.fields().lookupField('InputB')
+            ridx = unionlayer.fields().lookupField('RefB')
+            i = f.attributes()[iidx]
+            r = f.attributes()[ridx]
+            # Set the 'Combined' attribute value to show the combination
+            comb = ''
+            if i is not None:
+                if r is not None:
+                    comb = str(i) + str(r)
+                else:
+                    comb = str(i)
+            else:
+                if r is not None:
+                   comb = str(r)
+                else:
+                    comb = None
+            #self.showInfo('Combination: ' + str(comb))
+            unionlayer.changeAttributeValue(f.id(), combined_field_index, comb)
+        unionlayer.commitChanges()
 
         # Count polygons that are outside the input buffer and
         # inside the reference buffer.
 
-        ## Do multipart to singlepart:
-        #params={
-        #          'INPUT': result['OUTPUT'],
-        #          'OUTPUT': 'memory:Singlepart'
-        #}
-        #task = QgsProcessingAlgRunnerTask(self.multitosinglealg,params,context)
-        ## Add extra parameters (context, iteration, kind) using "partial"
-        #task.executed.connect(partial(self.tosingle_executed, context, iteration, kind))
-        #QgsApplication.taskManager().addTask(task)
-        #self.showInfo('Start MultipartToSinglepart: ' + str(iteration))
+        # Do multipart to singlepart: # OK
+        params={
+          #'INPUT': QgsProcessingUtils.mapLayerFromString(result['OUTPUT'], context),
+          'INPUT': unionlayer,
+          #'INPUT': result['OUTPUT'],
+          'OUTPUT': 'memory:Singlepart'
+        }
+        task = QgsProcessingAlgRunnerTask(self.multitosinglealg,params,context)
+        # Add extra parameters (context, iteration) using "partial"
+        task.executed.connect(partial(self.tosingle_executed, context, iteration))
+        QgsApplication.taskManager().addTask(task)
+        self.showInfo('Start MultipartToSinglepart: ' + str(iteration))
 
     # end of union_executed
+
+
+    def tosingle_executed(self, context, iteration, ok, result):
+        self.showInfo("To single executed: ")
+        self.showInfo("Iteration: " + str(iteration))
+        self.showInfo("OK: " + str(ok))
+        self.showInfo("Res: " + str(result))
+        if not ok:
+            self.showInfo("MultipartToSinglepart failed - " + str(iteration))
+            return
+        singlelayer = QgsProcessingUtils.mapLayerFromString(result['OUTPUT'], context)
+        self.showInfo('Polygon count finished')
+        xoqiquery = "\"Combined\"='R'"
+        #xoqiquery = "\"Combined\"='NULLR'"
+        singlelayer.selectByExpression (xoqiquery)
+        polycountoi = singlelayer.selectedFeatureCount()
+        self.polycount[iteration] = polycountoi
+        self.showInfo('Polygon count finished')
+
+
+
+    # end of tosingle_executed
 
     def task_completed(self, ok, result):
         self.showInfo("Task completed")
