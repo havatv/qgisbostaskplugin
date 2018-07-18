@@ -42,10 +42,11 @@ from qgis.PyQt.QtPrintSupport import QPrinter
 from qgis.PyQt.QtSvg import QSvgGenerator
 
 from qgis.core import QgsField
-#from qgis.core import QgsProcessingAlgRunnerTask   # ok
+from qgis.core import QgsProcessingAlgRunnerTask   # ok
 from qgis.core import QgsApplication   # ok
 from qgis.core import QgsProcessingContext  # thread manipulation?
 from qgis.core import QgsProcessingFeedback
+from qgis.core import QgsProcessingUtils
 
 #from qgis.core import QgsTaskManager  # Added (http://www.opengis.ch/2018/06/22/threads-in-pyqgis3/)
  
@@ -57,7 +58,7 @@ from qgis.core import QgsMessageLog, QgsProject
 #append(dirname(__file__))
 #from processing.core.Processing import processing
 import processing
-from processing.tools import dataobjects
+from processing.tools import dataobjects  # Not used
 
 
 FORM_CLASS, _ = uic.loadUiType(join(
@@ -89,6 +90,9 @@ class BOSDialog(QDialog, FORM_CLASS):
         self.labelTextSize = 8
         self.titleTextSize = 10
 
+        self.INPUT = 'input'
+        self.REF = 'reference'
+
         okButton = self.button_box.button(QDialogButtonBox.Ok)
         okButton.setText(self.OK)
         cancelButton = self.button_box.button(QDialogButtonBox.Cancel)
@@ -100,14 +104,23 @@ class BOSDialog(QDialog, FORM_CLASS):
 
         # Connect signals
         okButton.clicked.connect(self.startWorker)
-        self.displacementButton.clicked.connect(self.showPlots)
-        self.avgdispButton.clicked.connect(self.showAverageDisplacement)
-        self.oscillationButton.clicked.connect(self.showOscillation)
-        self.complmiscButton.clicked.connect(self.showComplenessMiscoding)
-        self.saveSvgButton.clicked.connect(self.saveAsSVG)
-        self.saveAsPdfButton.clicked.connect(self.saveAsPDF)
+        #self.displacementButton.clicked.connect(self.showPlots)
+        #self.avgdispButton.clicked.connect(self.showAverageDisplacement)
+        #self.oscillationButton.clicked.connect(self.showOscillation)
+        #self.complmiscButton.clicked.connect(self.showComplenessMiscoding)
+        #self.saveSvgButton.clicked.connect(self.saveAsSVG)
+        #self.saveAsPdfButton.clicked.connect(self.saveAsPDF)
         # Global variable for the statistics
-        self.statistics = []        
+        self.statistics = []    
+
+        # Global dictionary variable for input buffers
+        self.inputbuffers = {}
+        # Global dictionary variable for reference buffers    
+        self.referencebuffers = {}
+
+        # Global variables for statistics
+        # Number of polygons:
+        self.polycount = {};
 
 
 
@@ -119,42 +132,32 @@ class BOSDialog(QDialog, FORM_CLASS):
             self.statistics = []
             layerindex = self.inputLayer.currentIndex()
             layerId = self.inputLayer.itemData(layerindex)
-            #2# inputlayer = QgsMapLayerRegistry.instance().mapLayer(layerId)
             inputlayer = QgsProject.instance().mapLayer(layerId)
             if inputlayer is None:
                 self.showError(self.tr('No input layer defined'))
                 return
             refindex = self.referenceLayer.currentIndex()
             reflayerId = self.referenceLayer.itemData(refindex)
-            #2# reflayer = QgsMapLayerRegistry.instance().mapLayer(reflayerId)
-            reflayer = QgsProject.instance().mapLayer(reflayerId)
-            # not meaningful to 
+            self.reflayer = QgsProject.instance().mapLayer(reflayerId)
             if layerId == reflayerId:
                 self.showInfo('The reference layer must be different'
                               ' from the input layer!')
                 return
-
-            if reflayer is None:
+            if self.reflayer is None:
                 self.showError(self.tr('No reference layer defined'))
                 return
-            if reflayer is not None and reflayer.sourceCrs().isGeographic():
+            if self.reflayer is not None and self.reflayer.sourceCrs().isGeographic():
                 self.showWarning('Geographic CRS used for the reference layer -'
                                  ' computations will be in decimal degrees!')
             # Algorithms
-            bufferalg=QgsApplication.processingRegistry().algorithmById('native:buffer')
-            #bufferalg=QgsApplication.processingRegistry().algorithmById('qgis:buffer')
-            unionalg=QgsApplication.processingRegistry().algorithmById('qgis:union')
-            intersectionalg=QgsApplication.processingRegistry().algorithmById('qgis:intersection')
-            differencealg=QgsApplication.processingRegistry().algorithmById('qgis:difference')
-            multitosinglealg=QgsApplication.processingRegistry().algorithmById('qgis:multiparttosingleparts')
+            self.bufferalg=QgsApplication.processingRegistry().algorithmById('native:buffer')
+            #self.bufferalg=QgsApplication.processingRegistry().algorithmById('qgis:buffer')
+            self.unionalg=QgsApplication.processingRegistry().algorithmById('qgis:union')
+            self.intersectionalg=QgsApplication.processingRegistry().algorithmById('qgis:intersection')
+            self.differencealg=QgsApplication.processingRegistry().algorithmById('qgis:difference')
+            self.multitosinglealg=QgsApplication.processingRegistry().algorithmById('qgis:multiparttosingleparts')
             statalg=QgsApplication.processingRegistry().algorithmById('qgis:statisticsbycategories')
-            #outputlayername = self.outputDataset.text()
-            #approximateinputgeom = self.approximate_input_geom_cb.isChecked()
-            #joinprefix = self.joinPrefix.text()
-            #useindex = True
-            #useindex = self.use_index_nonpoint_cb.isChecked()
-            #useindexapproximation = self.use_indexapprox_cb.isChecked()
-            #distancefieldname = self.distancefieldname.text()
+            # Number of steps and radii
             steps = self.stepsSB.value()
             startradius = self.startRadiusSB.value()
             endradius = self.endRadiusSB.value()
@@ -162,7 +165,6 @@ class BOSDialog(QDialog, FORM_CLASS):
             radii = []
             for step in range(steps):
                 radii.append(startradius + step * delta)
-            #self.showInfo(str(radii))
             #radii = [10,20,50]
             #self.showInfo(str(radii))
             feedback = QgsProcessingFeedback()
@@ -176,86 +178,48 @@ class BOSDialog(QDialog, FORM_CLASS):
             # I følge oppskrifta på opengis.ch
             context = QgsProcessingContext()
             #context = plugincontext
-            # context = None ## (arguement 3 has unexpected type 'NoneType')
             #self.showInfo('Normal context: ' + str(context))
             #context.setProject(QgsProject.instance())
-            # I følge oppskrifta på opengis.ch:
-            #alg=QgsApplication.processingRegistry().algorithmById('native:buffer')
-            #alg=QgsApplication.processingRegistry().algorithmById('qgis:buffer')
-            #[p.name() for p in alg.parameterDefinitions()]
-
             for radius in radii:
-                # Buffer input
+                # Buffer input  # Works!
                 params={
                   'INPUT': inputlayer,
                   'DISTANCE': radius,
                   #'OUTPUT':'/home/havatv/test.shp'
                   'OUTPUT':'memory:Input buffer'
                 }
-                task = QgsProcessingAlgRunnerTask(bufferalg,params,context)
-                task.executed.connect(partial(self.task_executed, context, radius, 'input'))
+                task = QgsProcessingAlgRunnerTask(self.bufferalg,params,context)
+                # Add a few extra parameters (context, radius and "input") using "partial"
+                task.executed.connect(partial(self.buffer_executed, context, radius, self.INPUT))
                 QgsApplication.taskManager().addTask(task)
-                self.showInfo('Input buffer: ' + str(radius))
-                # Buffer reference
+                self.showInfo('Start Input buffer: ' + str(radius))
+                # Buffer reference  # Works!
                 params={
-                  'INPUT': reflayer,
+                  'INPUT': self.reflayer,
                   'DISTANCE': radius,
                   #'OUTPUT':'/home/havatv/test.shp'
                   'OUTPUT':'memory:Reference buffer'
                 }
-                task = QgsProcessingAlgRunnerTask(bufferalg,params,context)
-                task.executed.connect(partial(self.task_executed, context, radius, 'reference'))
+                task = QgsProcessingAlgRunnerTask(self.bufferalg,params,context)
+                # Add a few extra parameters (context, radius and "reference") using "partial"
+                task.executed.connect(partial(self.buffer_executed, context, radius, self.REF))
                 QgsApplication.taskManager().addTask(task)
-                self.showInfo('Ref buffer: ' + str(radius))
+                self.showInfo('Start Ref buffer: ' + str(radius))
 
 
-            #params={
-            #  'INPUT': inputlayer,
-            #  'DISTANCE': 100.0,
-            #  #'OUTPUT':'/home/havatv/test.shp'
-            #  'OUTPUT':'memory:Output buffer'
-            #}
-
-            ##  QgsProcessingAlgorithm, QVariantMap, QgsProcessingContext, QgsProcessingFeedback
-            ## Denne funker, men kræsjer etter at den er ferdig:
-            ##task = QgsProcessingAlgRunnerTask(alg,params,plugincontext)
-            ## Denne funker, men kræsjer etter at den er ferdig:
-
-            #task = QgsProcessingAlgRunnerTask(bufferalg,params,context) # kræsjer etter at algoritmen har kjørt ferdig
-
-            ## I følge oppskrifta på opengis.ch:
-            ##task = QgsProcessingAlgRunnerTask(alg,params,context,feedback)  # kræsjer ved oppstart
-            ##self.showInfo('Task: ' + str(task))
-            ##  connect()
             ##task.begun.connect(self.task_begun)
             ##task.taskCompleted.connect(self.task_completed)
-            ## Denne funker for mikrodatasett - ingen reaksjon for minidatasett:
-            ## kommer i tillegg til QGIS-progressbar på statuslinja
             ##task.progressChanged.connect(self.task_progress)
             ##task.taskTerminated.connect(self.task_stopped)
-            ##task.executed.connect(self.task_executed) # Crash
 
             #iteration = 5   # Identifiserer hvilken iterasjon det er snakk om
 
-            ## I følge oppskrifta på opengis.ch (partial legger inn context som første parameter?):
-
+            ## I følge oppskrifta på opengis.ch (partial legger inn context som første parameter):
+            ## context ser ut til å være helt nødvendig!
             #task.executed.connect(partial(self.task_executed, context, iteration))
-
-            ##task.executed.connect(partial(self.task_executed, feedback))  # Funker ikke - må ha context?
-            ## partial sets "context" as the first parameter - the first parameter of executed will then be given as the second parameter.
-
-            ##task.run()
-            ## Add the task to the task manager (is started ASAP)
-            ## I følge oppskrifta på opengis.ch
-
-            #QgsApplication.taskManager().addTask(task)  # Kræsjer qgis med trådproblemer
-
-            ## Kjører hele greia, men kræsjer ved avslutning.
-            #self.showInfo('Buffer 1 startet')  # Denne funker
-
-            ##self.button_box.button(QDialogButtonBox.Ok).setEnabled(False)
-            ##self.button_box.button(QDialogButtonBox.Close).setEnabled(False)
-            self.button_box.button(QDialogButtonBox.Cancel).setEnabled(True)
+            #self.button_box.button(QDialogButtonBox.Ok).setEnabled(False)
+            #self.button_box.button(QDialogButtonBox.Close).setEnabled(False)
+            #self.button_box.button(QDialogButtonBox.Cancel).setEnabled(True)
         except:
             import traceback
             self.showError(traceback.format_exc())
@@ -276,6 +240,161 @@ class BOSDialog(QDialog, FORM_CLASS):
         self.showInfo("Res: " + str(result))
         #self.showInfo("Context (encoding): " + str(context.defaultEncoding()))
         #self.showInfo("Context (thread): " + str(context.thread()))
+
+    # Handle the result of a buffer operation
+    def buffer_executed(self, context, iteration, kind, ok, result):
+        self.showInfo("Buffer executed (" + str(kind) + '): ' + str(iteration) + ', OK: ' + str(ok) + ', Res: ' + str(result))
+        #self.showInfo("Iteration: " + str(iteration))
+        #self.showInfo("Kind: " + str(kind))
+        #self.showInfo("OK: " + str(ok))
+        #self.showInfo("Res: " + str(result))
+        if not ok:
+            self.showInfo("Buffer failed - " + str(iteration) + ' ' + str(kind))
+            return
+
+        # Testing...
+        #blayer = result['OUTPUT'] ## blayer blir string!
+        blayer = QgsProcessingUtils.mapLayerFromString(result['OUTPUT'], context)
+        fcnt = 0
+        for f in blayer.getFeatures():
+            fcnt = fcnt + 1
+        self.showInfo("Feature count: " + str(fcnt))
+        if kind == self.INPUT:
+            self.inputbuffers[iteration] = result['OUTPUT']
+        elif kind == self.REF:
+            self.referencebuffers[iteration] = result['OUTPUT']
+        else:
+            self.showInfo("Strange kind of buffer: " + str(kind))
+        # Do line overlay:  # Works!
+        if kind == self.INPUT:
+            params={
+              'INPUT': self.reflayer,
+              #'OVERLAY': result['OUTPUT'],
+              #'OVERLAY': blayer,
+              'OVERLAY': QgsProcessingUtils.mapLayerFromString(result['OUTPUT'], context),
+              'OUTPUT':'memory:Intersection'
+            }
+            task = QgsProcessingAlgRunnerTask(self.intersectionalg,params,context)
+            # Add a few extra parameters (context, radius) using "partial"
+            task.executed.connect(partial(self.intersection_executed, context, iteration))
+            QgsApplication.taskManager().addTask(task)
+            self.showInfo('Start Intersection: ' + str(iteration))
+        #elif kind == self.REF:
+
+        todelete = []
+        # Check if both buffers are available:
+        for key in self.inputbuffers:
+            if key in self.referencebuffers:
+                # Union input  # Does not work!
+                params={
+                  #'INPUT': self.inputbuffers[key],
+                  'INPUT': QgsProcessingUtils.mapLayerFromString(self.inputbuffers[key], context),
+                  #'OVERLAY': self.referencebuffers[key],
+                  #'OVERLAY': blayer,
+                  'OVERLAY': QgsProcessingUtils.mapLayerFromString(result['OUTPUT'], context),
+                  'OUTPUT':'memory:Union'
+                }
+                task = QgsProcessingAlgRunnerTask(self.unionalg,params,context)
+                # Add a few extra parameters (context, radius) using "partial"
+                task.executed.connect(partial(self.union_executed, context, iteration))
+                QgsApplication.taskManager().addTask(task)
+                self.showInfo('Start Union: ' + str(iteration))
+                todelete.append(key)
+                #del self.inputbuffers[key]
+                #del self.referencebuffers[key]
+        for key in todelete:
+            del self.inputbuffers[key]
+            del self.referencebuffers[key]
+            self.showInfo('Removed key: ' + str(key))
+
+    # end of buffer_executed
+
+
+    def tosingle_executed(self, context, iteration, kind, ok, result):
+        self.showInfo("To single executed: ")
+        self.showInfo("Iteration: " + str(iteration))
+        self.showInfo("Kind: " + str(kind))
+        self.showInfo("OK: " + str(ok))
+        self.showInfo("Res: " + str(result))
+        if not ok:
+            self.showInfo("MultipartToSinglepart failed - " + str(iteration) + ' ' + str(kind))
+            return
+
+        if kind == self.INPUT:
+            self.inputbuffers[iteration] = result['OUTPUT']
+        elif kind == self.REF:
+            self.referencebuffers[iteration] = result['OUTPUT']
+        else:
+            self.showInfo("Strange kind of buffer: " + str(kind))
+        # Do line overlay:
+        if kind == self.INPUT:
+            params={
+              'INPUT': self.reflayer,
+              'OVERLAY': result['OUTPUT'],
+              'OUTPUT':'memory:Intersection'
+            }
+            task = QgsProcessingAlgRunnerTask(self.intersectionalg,params,context)
+            # Add a few extra parameters (context, radius) using "partial"
+            task.executed.connect(partial(self.intersection_executed, context, iteration))
+            QgsApplication.taskManager().addTask(task)
+            self.showInfo('Start Intersection: ' + str(iteration))
+        #elif kind == self.REF:
+
+        # Check if both buffers are available:
+        for key in self.inputbuffers:
+            if key in self.referencebuffers:
+                # Union input
+                params={
+                  'INPUT': self.inputbuffers[key],
+                  'OVERLAY': self.referencebuffers[key],
+                  'OUTPUT':'memory:Union'
+                }
+                task = QgsProcessingAlgRunnerTask(self.unionalg,params,context)
+                # Add a few extra parameters (context, radius) using "partial"
+                task.executed.connect(partial(self.union_executed, context, iteration))
+                QgsApplication.taskManager().addTask(task)
+                self.showInfo('Start Union: ' + str(iteration))
+                del self.inputbuffers[key]
+                del self.referencebuffers[key]
+    # end of tosingle_executed
+
+    def intersection_executed(self, context, iteration, ok, result):
+        self.showInfo("Intersection executed: " + str(iteration) + ', OK: ' + str(ok) + ', Res: ' + str(result))
+        #self.showInfo("Intersection executed: ")
+        #self.showInfo("Iteration: " + str(iteration))
+        #self.showInfo("OK: " + str(ok))
+        #self.showInfo("Res: " + str(result))
+
+        # Count polygons that are outside the input buffer and
+        # inside the reference buffer.
+
+    # end of union_executed
+
+    def union_executed(self, context, iteration, ok, result):
+        self.showInfo("Union executed: " + str(iteration) + ', OK: ' + str(ok) + ', Res: ' + str(result))
+        #self.showInfo("Union executed: ")
+        #self.showInfo("Iteration: " + str(iteration))
+        #self.showInfo("OK: " + str(ok))
+        #self.showInfo("Res: " + str(result))
+        if not ok:
+            self.showInfo("Union failed - " + str(iteration))
+            return
+
+        # Count polygons that are outside the input buffer and
+        # inside the reference buffer.
+
+        ## Do multipart to singlepart:
+        #params={
+        #          'INPUT': result['OUTPUT'],
+        #          'OUTPUT': 'memory:Singlepart'
+        #}
+        #task = QgsProcessingAlgRunnerTask(self.multitosinglealg,params,context)
+        ## Add extra parameters (context, iteration, kind) using "partial"
+        #task.executed.connect(partial(self.tosingle_executed, context, iteration, kind))
+        #QgsApplication.taskManager().addTask(task)
+        #self.showInfo('Start MultipartToSinglepart: ' + str(iteration))
+
+    # end of union_executed
 
     def task_completed(self, ok, result):
         self.showInfo("Task completed")
