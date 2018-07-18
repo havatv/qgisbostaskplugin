@@ -134,8 +134,8 @@ class BOSDialog(QDialog, FORM_CLASS):
             self.statistics = []
             layerindex = self.inputLayer.currentIndex()
             layerId = self.inputLayer.itemData(layerindex)
-            inputlayer = QgsProject.instance().mapLayer(layerId)
-            if inputlayer is None:
+            self.inputlayer = QgsProject.instance().mapLayer(layerId)
+            if self.inputlayer is None:
                 self.showError(self.tr('No input layer defined'))
                 return
             refindex = self.referenceLayer.currentIndex()
@@ -162,7 +162,7 @@ class BOSDialog(QDialog, FORM_CLASS):
 
             # Calculate the total length of lines in the layers
             self.inpgeomlength = 0
-            for f in inputlayer.getFeatures():
+            for f in self.inputlayer.getFeatures():
                 self.inpgeomlength = self.inpgeomlength + f.geometry().length()
             self.refgeomlength = 0
             for f in self.reflayer.getFeatures():
@@ -195,7 +195,7 @@ class BOSDialog(QDialog, FORM_CLASS):
             for radius in radii:
                 # Buffer input  # Works!
                 params={
-                  'INPUT': inputlayer,
+                  'INPUT': self.inputlayer,
                   'DISTANCE': radius,
                   #'OUTPUT':'/home/havatv/test.shp'
                   'OUTPUT':'memory:Input buffer'
@@ -312,7 +312,19 @@ class BOSDialog(QDialog, FORM_CLASS):
             task.executed.connect(partial(self.intersection_executed, context, iteration))
             QgsApplication.taskManager().addTask(task)
             self.showInfo('Start Intersection: ' + str(iteration))
-        #elif kind == self.REF:
+        elif kind == self.REF:
+                params={
+                  'INPUT': self.inputlayer,
+                  'OVERLAY': blayer,
+                  'OUTPUT':'memory:Difference'
+                }
+                task = QgsProcessingAlgRunnerTask(self.differencealg,params,context)
+                # Add a few extra parameters (context, radius) using "partial"
+                task.executed.connect(partial(self.difference_executed, context, iteration))
+                QgsApplication.taskManager().addTask(task)
+                self.showInfo('Start Difference: ' + str(iteration))
+
+
 
         todelete = []
         # Check if both buffers are available:
@@ -366,6 +378,14 @@ class BOSDialog(QDialog, FORM_CLASS):
            self.showInfo('refgeomlength = 0!')
         self.completeness[iteration] = BOScompleteness
     # end of intersection_executed
+
+    def difference_executed(self, context, iteration, ok, result):
+        self.showInfo("Difference executed: " + str(iteration) + ', OK: ' + str(ok) + ', Res: ' + str(result))
+        #self.showInfo("Intersection executed: ")
+        #self.showInfo("Iteration: " + str(iteration))
+        #self.showInfo("OK: " + str(ok))
+        #self.showInfo("Res: " + str(result))
+    # end of difference_executed
 
     def union_executed(self, context, iteration, ok, result):
         self.showInfo("Union executed: " + str(iteration) + ', OK: ' + str(ok) + ', Res: ' + str(result))
