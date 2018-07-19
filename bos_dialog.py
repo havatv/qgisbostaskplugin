@@ -26,6 +26,7 @@ from os.path import join
 #import os
 import csv
 import math
+from threading import Lock
 
 from qgis.PyQt import uic
 from qgis.PyQt.QtCore import QCoreApplication, QObject, QThread
@@ -111,27 +112,32 @@ class BOSDialog(QDialog, FORM_CLASS):
         #self.complmiscButton.clicked.connect(self.showComplenessMiscoding)
         #self.saveSvgButton.clicked.connect(self.saveAsSVG)
         #self.saveAsPdfButton.clicked.connect(self.saveAsPDF)
-        # Global variable for the statistics
-        self.statistics = []    
-
-        # Global dictionary variable for input buffers
+        QgsApplication.taskManager().allTasksFinished.connect(self.all_tasks_completed)
+        # Global variables with mutexes
+        # Dictionary variable for input buffers
         self.inputbuffers = {}
-        # Global dictionary variable for reference buffers    
+        self.ibmutex = Lock()
+        # Dictionary variable for reference buffers    
         self.referencebuffers = {}
-
-        # Global variables for statistics
+        self.rbmutex = Lock()
+        # Variables for statistics
         # Number of polygons:
         self.polycount = {};
+        self.pcmutex = Lock()
+        # Complenetess values:
         self.completeness = {};
-
-
+        self.comutex = Lock()
+        # Miscoding values:
+        self.miscodings = {};
+        self.mimutex = Lock()
+        # Other statistics
+        self.statistics = {}
+        self.stmutex = Lock()
 
 
     def startWorker(self):
         """Initialises and starts."""
         try:
-            # Initialise the statistics variable (to contain the results)
-            self.statistics = []
             layerindex = self.inputLayer.currentIndex()
             layerId = self.inputLayer.itemData(layerindex)
             self.inputlayer = QgsProject.instance().mapLayer(layerId)
@@ -158,7 +164,7 @@ class BOSDialog(QDialog, FORM_CLASS):
             self.intersectionalg=QgsApplication.processingRegistry().algorithmById('qgis:intersection')
             self.differencealg=QgsApplication.processingRegistry().algorithmById('qgis:difference')
             self.multitosinglealg=QgsApplication.processingRegistry().algorithmById('qgis:multiparttosingleparts')
-            statalg=QgsApplication.processingRegistry().algorithmById('qgis:statisticsbycategories')
+            self.statalg=QgsApplication.processingRegistry().algorithmById('qgis:statisticsbycategories')
 
             # Calculate the total length of lines in the layers
             self.inpgeomlength = 0
@@ -174,11 +180,11 @@ class BOSDialog(QDialog, FORM_CLASS):
             startradius = self.startRadiusSB.value()
             endradius = self.endRadiusSB.value()
             delta = (endradius - startradius) / (steps - 1)
-            radii = []
+            self.radii = []
             for step in range(steps):
-                radii.append(startradius + step * delta)
-            #radii = [10,20,50]
-            #self.showInfo(str(radii))
+                self.radii.append(startradius + step * delta)
+            #self.radii = [10,20,50]
+            #self.showInfo(str(self.radii))
             feedback = QgsProcessingFeedback()
             selectedinputonly = self.selectedFeaturesCheckBox.isChecked()
             selectedrefonly = self.selectedRefFeaturesCheckBox.isChecked()
@@ -192,31 +198,31 @@ class BOSDialog(QDialog, FORM_CLASS):
             #context = plugincontext
             #self.showInfo('Normal context: ' + str(context))
             #context.setProject(QgsProject.instance())
-            for radius in radii:
+            for radius in self.radii:
                 # Buffer input  # Works!
                 params={
                   'INPUT': self.inputlayer,
                   'DISTANCE': radius,
                   #'OUTPUT':'/home/havatv/test.shp'
-                  'OUTPUT':'memory:Input buffer'
+                  'OUTPUT': 'memory:InputBuffer'
                 }
                 task = QgsProcessingAlgRunnerTask(self.bufferalg,params,context)
                 # Add a few extra parameters (context, radius and "input") using "partial"
                 task.executed.connect(partial(self.buffer_executed, context, radius, self.INPUT))
                 QgsApplication.taskManager().addTask(task)
-                self.showInfo('Start Input buffer: ' + str(radius))
+                #self.showInfo('Start Input buffer: ' + str(radius))
                 # Buffer reference  # Works!
                 params={
                   'INPUT': self.reflayer,
                   'DISTANCE': radius,
                   #'OUTPUT':'/home/havatv/test.shp'
-                  'OUTPUT':'memory:Reference buffer'
+                  'OUTPUT': 'memory:ReferenceBuffer'
                 }
                 task = QgsProcessingAlgRunnerTask(self.bufferalg,params,context)
                 # Add a few extra parameters (context, radius and "reference") using "partial"
                 task.executed.connect(partial(self.buffer_executed, context, radius, self.REF))
                 QgsApplication.taskManager().addTask(task)
-                self.showInfo('Start Ref buffer: ' + str(radius))
+                #self.showInfo('Start Ref buffer: ' + str(radius))
 
 
             ##task.begun.connect(self.task_begun)
@@ -239,63 +245,71 @@ class BOSDialog(QDialog, FORM_CLASS):
             pass
         # End of startworker
 
-    # Handle the result of the processing
-    # I følge oppskrifta på opengis.ch (funker med partial!)
-    #def task_executed(context, ok, result):
-    def task_executed(self, context, iteration, kind, ok, result): # funker også (med partial)
-    #def task_executed(self, ok, result):
-    #def task_executed(ok, result):
-        self.showInfo("Task executed: ")
-        self.showInfo("Iteration: " + str(iteration))
-        self.showInfo("Kind: " + str(kind))
-        self.showInfo("OK: " + str(ok))
-        self.showInfo("Res: " + str(result))
-        #self.showInfo("Context (encoding): " + str(context.defaultEncoding()))
-        #self.showInfo("Context (thread): " + str(context.thread()))
+    ## Handle the result of the processing
+    ## I følge oppskrifta på opengis.ch (funker med partial!)
+    ##def task_executed(context, ok, result):
+    #def task_executed(self, context, iteration, kind, ok, result): # funker også (med partial)
+    ##def task_executed(self, ok, result):
+    ##def task_executed(ok, result):
+    #    self.showInfo("Task executed: ")
+    #    self.showInfo("Iteration: " + str(iteration))
+    #    self.showInfo("Kind: " + str(kind))
+    #    self.showInfo("OK: " + str(ok))
+    #    self.showInfo("Res: " + str(result))
+    #    #self.showInfo("Context (encoding): " + str(context.defaultEncoding()))
+    #    #self.showInfo("Context (thread): " + str(context.thread()))
+
 
     # Handle the result of a buffer operation
+    # Starts intesection, difference and union algorithms
+    # Global variables: self.inputbuffers (insert, access and remove),
+    #   self.referencebuffers (insert, access and remove), self.reflayer
+    #   (used as alg param), self.inputlayer (used as alg parameter).
     def buffer_executed(self, context, iteration, kind, ok, result):
-        self.showInfo("Buffer executed (" + str(kind) + '): ' + str(iteration) + ', OK: ' + str(ok) + ', Res: ' + str(result))
-        #self.showInfo("Iteration: " + str(iteration))
-        #self.showInfo("Kind: " + str(kind))
-        #self.showInfo("OK: " + str(ok))
-        #self.showInfo("Res: " + str(result))
+        #self.showInfo("Buffer executed (" + str(kind) + '): ' +
+        #              str(iteration) + ', OK: ' + str(ok) +
+        #              ', Res: ' + str(result))
         if not ok:
             self.showInfo("Buffer failed - " + str(iteration) + ' ' + str(kind))
             return
-
-        # Testing...
         #blayer = result['OUTPUT'] ## blayer blir string!
+        # Get the result (line) dataset from the buffer algorithm
         blayer = QgsProcessingUtils.mapLayerFromString(result['OUTPUT'], context)
-        #fcnt = 0
-        #for f in blayer.getFeatures():
-        #    fcnt = fcnt + 1
-        #self.showInfo("Feature count: " + str(fcnt))
-
+        # Add attribute
         provider = blayer.dataProvider()
         newfield = QgsField('InputB', QVariant.String, len=5)
         if kind == self.REF:
             newfield = QgsField('RefB', QVariant.String, len=5)
         provider.addAttributes([newfield])
         blayer.updateFields()
+        # Update the attribute
         blayer.startEditing()
         field_index = blayer.fields().lookupField('InputB')
         if kind == self.REF:
             field_index = blayer.fields().lookupField('RefB')
-        self.showInfo('refb, field index: ' + str(field_index))
-        # Set the attribute value to 'R'
+        #self.showInfo('refb, field index: ' + str(field_index))
         for f in provider.getFeatures():
             #self.showInfo('Feature (refb): ' + str(f))
             if kind == self.REF:
+                # Set the attribute value to 'R'
                 blayer.changeAttributeValue(f.id(), field_index, 'R')
             else:
+                # Set the attribute value to 'I'
                 blayer.changeAttributeValue(f.id(), field_index, 'I')
         blayer.commitChanges()
 
         if kind == self.INPUT:
-            self.inputbuffers[iteration] = result['OUTPUT']
+            self.ibmutex.acquire()  # Important to acquire ibmutex first (deadlock)
+            try:
+                self.inputbuffers[iteration] = result['OUTPUT']
+            finally:
+                self.ibmutex.release()
         elif kind == self.REF:
-            self.referencebuffers[iteration] = result['OUTPUT']
+            self.rbmutex.acquire()
+            try:
+                self.referencebuffers[iteration] = result['OUTPUT']
+            finally:
+                self.rbmutex.release()
         else:
             self.showInfo("Strange kind of buffer: " + str(kind))
         # Do line overlay:  # Works!
@@ -305,98 +319,133 @@ class BOSDialog(QDialog, FORM_CLASS):
               #'OVERLAY': result['OUTPUT'],
               'OVERLAY': blayer,
               #'OVERLAY': QgsProcessingUtils.mapLayerFromString(result['OUTPUT'], context),
-              'OUTPUT':'memory:Intersection'
+              'OUTPUT': 'memory:Intersection'
             }
-            task = QgsProcessingAlgRunnerTask(self.intersectionalg,params,context)
+            task = QgsProcessingAlgRunnerTask(self.intersectionalg, params, context)
             # Add a few extra parameters (context, radius) using "partial"
             task.executed.connect(partial(self.intersection_executed, context, iteration))
             QgsApplication.taskManager().addTask(task)
-            self.showInfo('Start Intersection: ' + str(iteration))
+            #self.showInfo('Start Intersection: ' + str(iteration))
         elif kind == self.REF:
-                params={
-                  'INPUT': self.inputlayer,
-                  'OVERLAY': blayer,
-                  'OUTPUT':'memory:Difference'
-                }
-                task = QgsProcessingAlgRunnerTask(self.differencealg,params,context)
-                # Add a few extra parameters (context, radius) using "partial"
-                task.executed.connect(partial(self.difference_executed, context, iteration))
-                QgsApplication.taskManager().addTask(task)
-                self.showInfo('Start Difference: ' + str(iteration))
+            # The reference buffer is used to remove parts of the input layer
+            params={
+              'INPUT': self.inputlayer,
+              'OVERLAY': blayer,
+              'OUTPUT': 'memory:Difference'
+            }
+            task = QgsProcessingAlgRunnerTask(self.differencealg,params,context)
+            # Add a few extra parameters (context, radius) using "partial"
+            task.executed.connect(partial(self.difference_executed, context, iteration))
+            QgsApplication.taskManager().addTask(task)
+            #self.showInfo('Start Difference: ' + str(iteration))
 
-
-
-        todelete = []
+        todelete = []  # buffer sizes to remove (after handling)
+        # Do union, if possible
         # Check if both buffers are available:
-        for key in self.inputbuffers:
-            if key in self.referencebuffers:
-                # Union input  # Does not work!
-                params={
-                  #'INPUT': self.inputbuffers[key],
-                  'INPUT': QgsProcessingUtils.mapLayerFromString(self.inputbuffers[key], context),
-                  #'OVERLAY': self.referencebuffers[key],
-                  #'OVERLAY': blayer,
-                  'OVERLAY': QgsProcessingUtils.mapLayerFromString(result['OUTPUT'], context),
-                  'OUTPUT':'memory:Union'
-                }
-                task = QgsProcessingAlgRunnerTask(self.unionalg,params,context)
-                # Add a few extra parameters (context, radius) using "partial"
-                task.executed.connect(partial(self.union_executed, context, iteration))
-                QgsApplication.taskManager().addTask(task)
-                self.showInfo('Start Union: ' + str(iteration))
-                todelete.append(key)
-                #del self.inputbuffers[key]
-                #del self.referencebuffers[key]
-        for key in todelete:
-            del self.inputbuffers[key]
-            del self.referencebuffers[key]
-            self.showInfo('Removed key: ' + str(key))
-
+        self.ibmutex.acquire() # Important to acquire ibmutex first (deadlock)
+        try:
+            self.rbmutex.acquire()
+            try:
+                for key in self.inputbuffers:
+                    if key in self.referencebuffers:
+                        # Union input  # Does not work!
+                        params={
+                          #'INPUT': self.inputbuffers[key],
+                          'INPUT': QgsProcessingUtils.mapLayerFromString(self.inputbuffers[key], context),
+                          #'OVERLAY': self.referencebuffers[key],
+                          'OVERLAY': QgsProcessingUtils.mapLayerFromString(self.referencebuffers[key], context),
+                          'OUTPUT': 'memory:Union'
+                        }
+                        task = QgsProcessingAlgRunnerTask(self.unionalg,params,context)
+                        # Add a few extra parameters (context, radius) using "partial"
+                        task.executed.connect(partial(self.union_executed, context, iteration))
+                        QgsApplication.taskManager().addTask(task)
+                        #self.showInfo('Start Union: ' + str(iteration))
+                        todelete.append(key)
+                        #del self.inputbuffers[key]
+                        #del self.referencebuffers[key]
+                for key in todelete:
+                    del self.inputbuffers[key]
+                    del self.referencebuffers[key]
+                    #self.showInfo('Removed key: ' + str(key))
+            finally:
+                self.rbmutex.release()
+        finally:
+            self.ibmutex.release()
     # end of buffer_executed
 
 
+    # Handle the result of the intersection operation between the
+    # reference (line) layer and the input buffer.
+    # Only global accessed is self.completeness
     def intersection_executed(self, context, iteration, ok, result):
-        self.showInfo("Intersection executed: " + str(iteration) + ', OK: ' + str(ok) + ', Res: ' + str(result))
-        #self.showInfo("Intersection executed: ")
-        #self.showInfo("Iteration: " + str(iteration))
-        #self.showInfo("OK: " + str(ok))
-        #self.showInfo("Res: " + str(result))
-
-
-
-        # reference lines with input buffer (completeness)
+        #self.showInfo("Intersection executed: " + str(iteration) + ', OK: ' + str(ok) + ', Res: ' + str(result))
+        # Get the result (line) dataset from the intersection algorithm
         reflineinpbuflayer = QgsProcessingUtils.mapLayerFromString(result['OUTPUT'], context)
         #self.showInfo('Reference line Intersect input buffer #features: ' + str(reflineinpbuflayer.featureCount()))
+        # Calculate the total length of lines
         reflinelength = 0
         for f in reflineinpbuflayer.getFeatures():
             reflinelength = reflinelength + f.geometry().length()
-        self.showInfo('Completeness: ' + str(reflinelength) + ' - ' + str(self.refgeomlength))
+        #self.showInfo('Completeness: ' + str(reflinelength) + ' - ' + str(self.refgeomlength))
         if self.refgeomlength > 0:
            BOScompleteness = reflinelength / self.refgeomlength
         else:
            BOScompleteness = 0
            self.showInfo('refgeomlength = 0!')
-        self.completeness[iteration] = BOScompleteness
+        self.comutex.acquire()
+        try: 
+            self.completeness[iteration] = BOScompleteness
+        finally:
+            self.comutex.release()
+
+        #if QgsApplication.taskManager().count() == 0:
+        #    self.all_tasks_completed()
     # end of intersection_executed
 
+
+    # Handle the result of the difference operation between the input
+    # line layer and the refbuffer layer
+    # Only global accessed is self.miscodings
     def difference_executed(self, context, iteration, ok, result):
-        self.showInfo("Difference executed: " + str(iteration) + ', OK: ' + str(ok) + ', Res: ' + str(result))
-        #self.showInfo("Intersection executed: ")
-        #self.showInfo("Iteration: " + str(iteration))
-        #self.showInfo("OK: " + str(ok))
-        #self.showInfo("Res: " + str(result))
+        #self.showInfo("Difference executed: " + str(iteration) + ', OK: ' + str(ok) + ', Res: ' + str(result))
+        if not ok:
+            self.showInfo("Difference failed - " + str(iteration))
+            return
+        # Get the result (line) dataset for the result
+        inplinerefbuflayer = QgsProcessingUtils.mapLayerFromString(result['OUTPUT'], context)
+        # Calculate the total length of lines
+        inplinelength = 0
+        for f in inplinerefbuflayer.getFeatures():
+                    inplinelength = inplinelength + f.geometry().length()
+        if self.inpgeomlength > 0:
+            BOSmiscodings = inplinelength / self.inpgeomlength
+        else:
+            BOSmiscodings = 0
+        #self.showInfo('Miscodings: ' + str(BOSmiscodings))
+        # update the miscodings dictionary
+        self.mimutex.acquire()
+        try: 
+            self.miscodings[iteration] = BOSmiscodings
+        finally:
+            self.mimutex.release()
+        #if QgsApplication.taskManager().count() == 0:
+        #    self.all_tasks_completed()
     # end of difference_executed
 
+
+    # Handle the result of the union operation between the input
+    # buffer and the reference buffer
+    # Starts multiparttosinglepart algorithm
+    # No global variables are accessed
     def union_executed(self, context, iteration, ok, result):
-        self.showInfo("Union executed: " + str(iteration) + ', OK: ' + str(ok) + ', Res: ' + str(result))
-        #self.showInfo("Union executed: ")
-        #self.showInfo("Iteration: " + str(iteration))
-        #self.showInfo("OK: " + str(ok))
-        #self.showInfo("Res: " + str(result))
+        #self.showInfo("Union executed: " + str(iteration) + ', OK: ' + str(ok) + ', Res: ' + str(result))
         if not ok:
             self.showInfo("Union failed - " + str(iteration))
             return
+        # Get the result (polygon) dataset from the union algorithm
         unionlayer = QgsProcessingUtils.mapLayerFromString(result['OUTPUT'], context)
+        # Add attributes
         provider=unionlayer.dataProvider()
         provider.addAttributes([QgsField('Area', QVariant.Double)])
         provider.addAttributes([QgsField('Combined', QVariant.String, len=40)])
@@ -406,6 +455,7 @@ class BOSDialog(QDialog, FORM_CLASS):
         #self.showInfo('union, area field index: ' + str(area_field_index))
         combined_field_index = unionlayer.fields().lookupField('Combined') # OK
         #self.showInfo('union, combined field index: ' + str(combined_field_index))
+        # Update the attributes
         for f in provider.getFeatures():
             #self.showInfo('Feature: ' + str(f))
             area = f.geometry().area()
@@ -430,9 +480,6 @@ class BOSDialog(QDialog, FORM_CLASS):
             unionlayer.changeAttributeValue(f.id(), combined_field_index, comb)
         unionlayer.commitChanges()
 
-        # Count polygons that are outside the input buffer and
-        # inside the reference buffer.
-
         # Do multipart to singlepart: # OK
         params={
           #'INPUT': QgsProcessingUtils.mapLayerFromString(result['OUTPUT'], context),
@@ -444,54 +491,124 @@ class BOSDialog(QDialog, FORM_CLASS):
         # Add extra parameters (context, iteration) using "partial"
         task.executed.connect(partial(self.tosingle_executed, context, iteration))
         QgsApplication.taskManager().addTask(task)
-        self.showInfo('Start MultipartToSinglepart: ' + str(iteration))
+        #self.showInfo('Start MultipartToSinglepart: ' + str(iteration))
 
+        # Do the statistics
+        params={
+            'INPUT': unionlayer,
+            'VALUES_FIELD_NAME': 'Area',
+            'CATEGORIES_FIELD_NAME': 'Combined',
+            #'OUTPUT':'/home/havatv/stats.csv'
+            'OUTPUT': 'memory:Statistics'
+        }
+        task = QgsProcessingAlgRunnerTask(self.statalg,params,context)
+        # Add extra parameters (context, iteration) using "partial"
+        task.executed.connect(partial(self.stats_executed, context, iteration))
+        QgsApplication.taskManager().addTask(task)
+        #self.showInfo('Start MultipartToSinglepart: ' + str(iteration))
     # end of union_executed
 
 
+    # Handle the result of the multiparttosinglepart operation (on the
+    # union of the input and reference buffer dataset).
+    # Global variable self.polycount updated
     def tosingle_executed(self, context, iteration, ok, result):
-        self.showInfo("To single executed: ")
-        self.showInfo("Iteration: " + str(iteration))
-        self.showInfo("OK: " + str(ok))
-        self.showInfo("Res: " + str(result))
+        #self.showInfo("To single executed: " + str(iteration) + ', OK: ' + str(ok) + ', Res: ' + str(result))
         if not ok:
             self.showInfo("MultipartToSinglepart failed - " + str(iteration))
             return
+        # Get the result (polygon) dataset from the multiparttosinglepart algorithm
         singlelayer = QgsProcessingUtils.mapLayerFromString(result['OUTPUT'], context)
-        self.showInfo('Polygon count finished')
+        #self.showInfo('Polygon count finished')
+        # Select the polygons that are outside input and inside reference
         xoqiquery = "\"Combined\"='R'"
         #xoqiquery = "\"Combined\"='NULLR'"
         singlelayer.selectByExpression (xoqiquery)
         polycountoi = singlelayer.selectedFeatureCount()
-        self.polycount[iteration] = polycountoi
-        self.showInfo('Polygon count finished')
-
-
-
+        self.pcmutex.acquire()
+        try:
+            self.polycount[iteration] = polycountoi
+        finally:
+            self.pcmutex.release()
+        #if QgsApplication.taskManager().count() == 0:
+        #    self.all_tasks_completed()
     # end of tosingle_executed
 
-    def task_completed(self, ok, result):
-        self.showInfo("Task completed")
 
-    def task_begun(self):
-        self.showInfo("Task begun.")
+    # Handle the result of the statisticsbycategories operation (on
+    # the union of the input and reference buffer).
+    # Global variable self.statistics updated
+    def stats_executed(self, context, iteration, ok, result):
+        #self.showInfo("Stats executed: " + str(iteration) + ', OK: ' + str(ok) + ', Res: ' + str(result))
+        if not ok:
+            self.showInfo("Statistics failed - " + str(iteration))
+            return
+        # Get the result (polygon) dataset from the multiparttosinglepart algorithm
+        statlayer = QgsProcessingUtils.mapLayerFromString(result['OUTPUT'], context)
+        #self.showInfo("CSV file: " + str(result['OUTPUT']))
+        #self.showInfo("Stat layer fields: " + statlayer.fields().names()[0])
+        currstats = {}
+        sumidx = statlayer.fields().lookupField('sum')
+        self.showInfo("Sumindex: " + str(sumidx))
+        for f in statlayer.getFeatures():
+            sum = f.attributes()[sumidx]
+            self.showInfo("Sum: " + str(sum))
+            first = f.attributes()[0]
+            self.showInfo("First: " + str(first))
+            currstats[first] = sum
+        self.stmutex.acquire()
+        try:
+            self.statistics[iteration] = currstats
+        finally:
+            self.stmutex.release()
+        #if QgsApplication.taskManager().count() == 0:
+        #    self.all_tasks_completed()
+    # end of stats_executed
 
-    def task_stopped(self):
-        self.showInfo("Task stopped.")
 
-    # Denne fungerer (blir kalt). Progressbar i statuslinja får samme data)
-    def task_progress(self, prog):
-        #self.showInfo("Task progress. " + str(prog))
-        return
+    # Wrap it up when all tasks have completed and all work is done!
+    # Global variables accessed (read only): self.polycount,
+    # self.completeness, self.miscodings, self.statistics
+    def all_tasks_completed(self):
+        # Must check that all the work has been done
+        # Secure access to the global variables
+        self.pcmutex.acquire()
+        try:
+            if len(self.polycount) < len(self.radii):
+                return
+        finally:
+            self.pcmutex.release()
+        self.comutex.acquire()
+        try:
+            if len(self.completeness) < len(self.radii):
+                return
+        finally:
+            self.comutex.release()
+        self.mimutex.acquire()
+        try:
+            if len(self.miscodings) < len(self.radii):
+                return
+        finally:
+            self.mimutex.release()
+        self.stmutex.acquire()
+        try:
+            if len(self.statistics) < len(self.radii):
+                return
+        finally:
+            self.stmutex.release()
+        self.showInfo("All tasks completed!")
+        for radius in self.radii:
+            self.showInfo("Radius: " + str(radius))
+            self.showInfo("Polycount: " + str(self.polycount[radius]))
+            self.showInfo("Completeness: " + str(self.completeness[radius]))
+            self.showInfo("Miscodings: " + str(self.miscodings[radius]))
+            self.showInfo("Stats - R: " + str(self.statistics[radius]['R']))
+            self.showInfo("Stats - I: " + str(self.statistics[radius]['I']))
+            self.showInfo("Stats - IR: " + str(self.statistics[radius]['IR']))
+        # self.button_box.button(QDialogButtonBox.Ok).setEnabled(True)
+        # self.button_box.button(QDialogButtonBox.Close).setEnabled(True)
+        # self.button_box.button(QDialogButtonBox.Cancel).setEnabled(False)
 
-    #def workerFinished(self, ok, ret):
-    #    """Handles the output from the worker and cleans up after the
-    #       worker has finished."""
-    #    self.progressBar.setValue(0.0)
-    #    self.button_box.button(QDialogButtonBox.Ok).setEnabled(True)
-    #    self.button_box.button(QDialogButtonBox.Close).setEnabled(True)
-    #    self.button_box.button(QDialogButtonBox.Cancel).setEnabled(False)
-    #    # End of workerFinished
 
     def showError(self, text):
         """Show an error."""
