@@ -43,6 +43,9 @@ from qgis.PyQt.QtGui import QPainter
 from qgis.PyQt.QtPrintSupport import QPrinter
 from qgis.PyQt.QtSvg import QSvgGenerator
 
+from qgis.core import QgsWkbTypes  # For checking layer type in the copy layer function
+from qgis.core import QgsVectorLayer
+
 from qgis.core import QgsField
 from qgis.core import QgsProcessingAlgRunnerTask   # ok
 from qgis.core import QgsApplication   # ok
@@ -112,7 +115,6 @@ class BOSDialog(QDialog, FORM_CLASS):
         #self.complmiscButton.clicked.connect(self.showComplenessMiscoding)
         #self.saveSvgButton.clicked.connect(self.saveAsSVG)
         #self.saveAsPdfButton.clicked.connect(self.saveAsPDF)
-        QgsApplication.taskManager().allTasksFinished.connect(self.all_tasks_completed)
         # Global variables with mutexes
         # Dictionary variable for input buffers
         self.inputbuffers = {}
@@ -134,9 +136,27 @@ class BOSDialog(QDialog, FORM_CLASS):
         self.statistics = {}
         self.stmutex = Lock()
 
+        self.testcounter = 0
+        self.tcmutex = Lock()
+
+        self.radiuses = []
+
+        # This one fires "immediately"?
+        QgsApplication.taskManager().allTasksFinished.connect(self.all_tasks_completed)
+
+
 
     def startWorker(self):
         """Initialises and starts."""
+        self.inputbuffers = {}
+        self.referencebuffers = {}
+        self.polycount = {};
+        self.completeness = {};
+        self.miscodings = {};
+        self.statistics = {}
+        self.testcounter = 0
+
+
         try:
             layerindex = self.inputLayer.currentIndex()
             layerId = self.inputLayer.itemData(layerindex)
@@ -154,8 +174,11 @@ class BOSDialog(QDialog, FORM_CLASS):
             if self.reflayer is None:
                 self.showError(self.tr('No reference layer defined'))
                 return
-            if self.reflayer is not None and self.reflayer.sourceCrs().isGeographic():
-                self.showWarning('Geographic CRS used for the reference layer -'
+            if self.inputlayer.sourceCrs().authid () != self.reflayer.sourceCrs().authid ():
+                self.showWarning('Layers must have the same CRS - Input: ' + str(self.inputlayer.sourceCrs().authid()) + ' Reference: ' + str(self.reflayer.sourceCrs().authid()))
+                return
+            if self.reflayer.sourceCrs().isGeographic():
+                self.showWarning('Geographic CRS used -' +
                                  ' computations will be in decimal degrees!')
             # Algorithms
             self.bufferalg=QgsApplication.processingRegistry().algorithmById('native:buffer')
@@ -174,17 +197,16 @@ class BOSDialog(QDialog, FORM_CLASS):
             for f in self.reflayer.getFeatures():
                 self.refgeomlength = self.refgeomlength + f.geometry().length()
 
-
             # Number of steps and radii
             steps = self.stepsSB.value()
             startradius = self.startRadiusSB.value()
             endradius = self.endRadiusSB.value()
             delta = (endradius - startradius) / (steps - 1)
-            self.radii = []
+            self.radiuses = []
             for step in range(steps):
-                self.radii.append(startradius + step * delta)
-            #self.radii = [10,20,50]
-            #self.showInfo(str(self.radii))
+                self.radiuses.append(startradius + step * delta)
+            #self.radiuses = [10,20,50]
+            #self.showInfo(str(self.radiuses))
             feedback = QgsProcessingFeedback()
             selectedinputonly = self.selectedFeaturesCheckBox.isChecked()
             selectedrefonly = self.selectedRefFeaturesCheckBox.isChecked()
@@ -198,31 +220,39 @@ class BOSDialog(QDialog, FORM_CLASS):
             #context = plugincontext
             #self.showInfo('Normal context: ' + str(context))
             #context.setProject(QgsProject.instance())
-            for radius in self.radii:
+            for radius in self.radiuses:
                 # Buffer input  # Works!
+                inlayercopy = QgsVectorLayer(self.inputlayer.source(), 'in' + str(radius), self.inputlayer.providerType())
+                ##inlayercopy = self.copylayer(self.inputlayer, 'in' + str(radius))
                 params={
-                  'INPUT': self.inputlayer,
+                  'INPUT': inlayercopy,
+                  #'INPUT': self.inputlayer,
                   'DISTANCE': radius,
                   #'OUTPUT':'/home/havatv/test.shp'
                   'OUTPUT': 'memory:InputBuffer'
                 }
                 task = QgsProcessingAlgRunnerTask(self.bufferalg,params,context)
+                ##task = QgsProcessingAlgRunnerTask(self.bufferalg,params,context,feedback)
                 # Add a few extra parameters (context, radius and "input") using "partial"
                 task.executed.connect(partial(self.buffer_executed, context, radius, self.INPUT))
                 QgsApplication.taskManager().addTask(task)
-                #self.showInfo('Start Input buffer: ' + str(radius))
+                self.showInfo('Start Input buffer: ' + str(radius))
                 # Buffer reference  # Works!
+                reflayercopy = QgsVectorLayer(self.reflayer.source(), 'ref' + str(radius), self.reflayer.providerType())
+                #reflayercopy = self.copylayer(self.reflayer, 'ref' + str(radius))
                 params={
-                  'INPUT': self.reflayer,
+                  'INPUT': reflayercopy,
+                  #'INPUT': self.reflayer,
                   'DISTANCE': radius,
                   #'OUTPUT':'/home/havatv/test.shp'
                   'OUTPUT': 'memory:ReferenceBuffer'
                 }
                 task = QgsProcessingAlgRunnerTask(self.bufferalg,params,context)
+                #task = QgsProcessingAlgRunnerTask(self.bufferalg,params,context,feedback)
                 # Add a few extra parameters (context, radius and "reference") using "partial"
                 task.executed.connect(partial(self.buffer_executed, context, radius, self.REF))
                 QgsApplication.taskManager().addTask(task)
-                #self.showInfo('Start Ref buffer: ' + str(radius))
+                self.showInfo('Start Ref buffer: ' + str(radius))
 
 
             ##task.begun.connect(self.task_begun)
@@ -260,7 +290,7 @@ class BOSDialog(QDialog, FORM_CLASS):
     #    #self.showInfo("Context (thread): " + str(context.thread()))
 
 
-    # Handle the result of a buffer operation
+    # Handle the result of a *** BUFFER *** operation
     # Starts intesection, difference and union algorithms
     # Global variables: self.inputbuffers (insert, access and remove),
     #   self.referencebuffers (insert, access and remove), self.reflayer
@@ -269,6 +299,14 @@ class BOSDialog(QDialog, FORM_CLASS):
         #self.showInfo("Buffer executed (" + str(kind) + '): ' +
         #              str(iteration) + ', OK: ' + str(ok) +
         #              ', Res: ' + str(result))
+        self.tcmutex.acquire()
+        try:
+            self.testcounter = self.testcounter + 1
+            self.showInfo("Buffer finished: " + str(iteration) + ' - ' + str(kind) + ' ' + str(self.testcounter) + ' ' + str(QgsApplication.taskManager().count()))
+        finally:
+            self.tcmutex.release()
+        #return
+
         if not ok:
             self.showInfo("Buffer failed - " + str(iteration) + ' ' + str(kind))
             return
@@ -314,8 +352,11 @@ class BOSDialog(QDialog, FORM_CLASS):
             self.showInfo("Strange kind of buffer: " + str(kind))
         # Do line overlay:  # Works!
         if kind == self.INPUT:
+            reflayercopy = QgsVectorLayer(self.reflayer.source(), 'refint' + str(iteration), self.reflayer.providerType())
+            #reflayercopy = self.copylayer(self.reflayer, 'refint' + str(iteration))
             params={
-              'INPUT': self.reflayer,
+              'INPUT': reflayercopy,
+              #'INPUT': self.reflayer,
               #'OVERLAY': result['OUTPUT'],
               'OVERLAY': blayer,
               #'OVERLAY': QgsProcessingUtils.mapLayerFromString(result['OUTPUT'], context),
@@ -328,8 +369,11 @@ class BOSDialog(QDialog, FORM_CLASS):
             #self.showInfo('Start Intersection: ' + str(iteration))
         elif kind == self.REF:
             # The reference buffer is used to remove parts of the input layer
+            inlayercopy = QgsVectorLayer(self.inputlayer.source(), 'indiff' + str(iteration), self.inputlayer.providerType())
+            #inlayercopy = self.copylayer(self.inputlayer, 'indiff' + str(iteration))
             params={
-              'INPUT': self.inputlayer,
+              'INPUT': inlayercopy,
+              #'INPUT': self.inputlayer,
               'OVERLAY': blayer,
               'OUTPUT': 'memory:Difference'
             }
@@ -574,30 +618,30 @@ class BOSDialog(QDialog, FORM_CLASS):
         # Secure access to the global variables
         self.pcmutex.acquire()
         try:
-            if len(self.polycount) < len(self.radii):
+            if len(self.polycount) < len(self.radiuses):
                 return
         finally:
             self.pcmutex.release()
         self.comutex.acquire()
         try:
-            if len(self.completeness) < len(self.radii):
+            if len(self.completeness) < len(self.radiuses):
                 return
         finally:
             self.comutex.release()
         self.mimutex.acquire()
         try:
-            if len(self.miscodings) < len(self.radii):
+            if len(self.miscodings) < len(self.radiuses):
                 return
         finally:
             self.mimutex.release()
         self.stmutex.acquire()
         try:
-            if len(self.statistics) < len(self.radii):
+            if len(self.statistics) < len(self.radiuses):
                 return
         finally:
             self.stmutex.release()
         self.showInfo("All tasks completed!")
-        for radius in self.radii:
+        for radius in self.radiuses:
             self.showInfo("Radius: " + str(radius))
             self.showInfo("Polycount: " + str(self.polycount[radius]))
             self.showInfo("Completeness: " + str(self.completeness[radius]))
@@ -608,6 +652,24 @@ class BOSDialog(QDialog, FORM_CLASS):
         # self.button_box.button(QDialogButtonBox.Ok).setEnabled(True)
         # self.button_box.button(QDialogButtonBox.Close).setEnabled(True)
         # self.button_box.button(QDialogButtonBox.Cancel).setEnabled(False)
+
+    def copylayer(self, layer, name):
+        geometrytype = layer.geometryType
+        geomtext = ""
+        if geometrytype == QgsWkbTypes.LineGeometry:
+            geomtext = "Linestring"
+        elif geometrytype == QgsWkbTypes.PolygonGeometry:
+            geomtext = "Polygon"
+        geomtext = geomtext + "?epsg:4326"
+        feats = [feat for feat in layer.getFeatures()]
+        mem_layer = QgsVectorLayer(geomtext, name, "memory")
+        mem_layer.setCrs(layer.crs())
+        mem_layer_data = mem_layer.dataProvider()
+        attr = layer.dataProvider().fields().toList()
+        mem_layer_data.addAttributes(attr)
+        mem_layer.updateFields()
+        mem_layer_data.addFeatures(feats)
+        return mem_layer
 
 
     def showError(self, text):
