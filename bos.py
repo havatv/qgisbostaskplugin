@@ -156,12 +156,13 @@ class BOS:
             action.setWhatsThis(whats_this)
 
         if add_to_toolbar:
-            #self.toolbar.addAction(action)
+        #    self.toolbar.addAction(action)
             ## Add toolbar icon
             if hasattr(self.iface, 'addVectorToolBarIcon'):
                 self.iface.addVectorToolBarIcon(action)
             else:
                 self.iface.addToolBarIcon(self.action)
+
         if add_to_menu and hasattr(self.iface, 'addPluginToVectorMenu'):
             self.iface.addPluginToVectorMenu(
                 self.BOSAMP,
