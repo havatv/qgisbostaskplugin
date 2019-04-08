@@ -229,6 +229,9 @@ p, li { white-space: pre-wrap; }
           </item>
           <item>
            <widget class="QSpinBox" name="stepsSB">
+            <property name="minimum">
+             <number>1</number>
+            </property>
             <property name="maximum">
              <number>9999</number>
             </property>
