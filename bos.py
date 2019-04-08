@@ -21,25 +21,17 @@
  *                                                                         *
  ***************************************************************************/
 """
-#2# from PyQt4.QtCore import QSettings, QTranslator, qVersion, QCoreApplication
-#2# from PyQt4.QtGui import QAction, QIcon
-#2# from PyQt4.QtGui import QMessageBox
 from qgis.PyQt.QtCore import QSettings, QCoreApplication
-#QFileInfo, 
 from qgis.PyQt.QtCore import QTranslator, qVersion
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction, QMessageBox
 
-#2# from qgis.core import QgsMapLayerRegistry, QgsMapLayer
-#2# from qgis.core import QGis
 from qgis.core import QgsProject, QgsMapLayer, QgsWkbTypes
 
 # Plugin imports
-import sys
 import os.path
-sys.path.append(os.path.dirname(__file__))
 # Initialize Qt resources from file resources.py
-import resources
+from .resources import *
 # Import the code for the dialog
 from .bos_dialog import BOSDialog
 
